@@ -141,5 +141,21 @@ app.post('/api/reposicion-actual/cerrar', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------- Inicialización automática de la base de datos ----------
+// Crea las tablas y los códigos iniciales al arrancar (si no existen).
+// Así no se necesita el Shell de Render (que es de pago).
+const fs = require('fs');
+async function initDB() {
+  try {
+    const sql = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
+    await pool.query(sql);
+    console.log('Base de datos verificada/inicializada correctamente.');
+  } catch (e) {
+    console.error('Error inicializando la base de datos:', e.message);
+  }
+}
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Caja Chica en puerto ${PORT}`));
+initDB().then(() => {
+  app.listen(PORT, () => console.log(`Caja Chica en puerto ${PORT}`));
+});

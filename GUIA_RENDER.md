@@ -41,13 +41,13 @@ Similar a como desplegaste el gestor de tareas. Pasos:
    - `DATABASE_URL` = (el Internal Database URL que copiaste en el paso 1)
 4. Create Web Service.
 
-## 4. Inicializar las tablas (una sola vez)
-Cuando el servicio esté desplegado, abre la pestaña **Shell** en Render y ejecuta:
-```
-npm run initdb
-```
-Esto crea las tablas y carga los códigos iniciales (ADM000, OP000, SO000, ISLA).
-Verás: "Base de datos inicializada correctamente."
+## 4. Las tablas se crean solas (¡ya no necesitas Shell!)
+Desde la versión 3.2, el servidor crea las tablas y carga los códigos iniciales
+(ADM000, OP000, SO000, ISLA, OFICINA) **automáticamente al arrancar**. No necesitas
+la pestaña Shell (que es de pago en Render).
+
+En los **Logs** de Render, la primera vez verás:
+"Base de datos verificada/inicializada correctamente."
 
 ## 5. Listo
 Abre la URL del servicio. La app carga los catálogos desde la base de datos.
