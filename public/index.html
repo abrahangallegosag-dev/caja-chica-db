@@ -12,6 +12,8 @@
 </script>
 <!-- ExcelJS: exporta a Excel conservando logo, colores y bordes de la plantilla oficial -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<!-- Chart.js: gráficos del dashboard -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root{
     --tinta:#12241c; --tesoro:#1b6b4f; --tesoro-claro:#e7f2ec;
@@ -61,7 +63,8 @@
     border-radius:50%;display:inline-block;animation:giro .7s linear infinite;vertical-align:middle;margin-right:8px}
   @keyframes giro{to{transform:rotate(360deg)}}
 
-  .tabla-scroll{overflow-x:auto;border-radius:10px;box-shadow:0 1px 0 var(--linea)}
+  .tabla-scroll{overflow:auto;max-height:60vh;border-radius:10px;box-shadow:0 1px 0 var(--linea)}
+  .tabla-scroll thead th{position:sticky;top:0;z-index:2}
   .tabla-caja{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;
     font-size:12.5px;min-width:1050px}
   .tabla-caja thead th{background:var(--tinta);color:var(--papel);text-align:left;padding:9px 8px;
@@ -121,7 +124,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 3.2</div>
+    <div style="font-size:12px;color:#7d867f">Versión 3.4</div>
   </div>
 </header>
 
@@ -140,6 +143,21 @@
     <div class="celda exc"><div class="et">Excedente</div><div class="vl num" id="tExc">$0.00</div></div>
     <div class="celda saldo"><div class="et">Saldo</div><div class="vl num" id="tSaldo">$250.00</div></div>
     <div class="celda"><div class="et">Comprobantes</div><div class="vl num" id="tCount">0</div></div>
+  </div>
+
+  <!-- Dashboard: gasto por código de proyecto -->
+  <div id="dashboard" style="display:none;background:#fff;border:1px solid var(--linea);border-radius:12px;
+       padding:18px 20px;margin-bottom:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h2 style="font-size:15px">Gasto por código de proyecto</h2>
+      <button class="btn btn-sec" style="font-size:12px;padding:6px 12px" onclick="toggleDash()">
+        <span id="dashToggle">Ocultar</span>
+      </button>
+    </div>
+    <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:center" id="dashGrid">
+      <div style="position:relative;height:220px"><canvas id="chartProy"></canvas></div>
+      <div id="dashTabla" style="font-size:13px"></div>
+    </div>
   </div>
 
   <div class="dropzone" id="dropzone" onclick="document.getElementById('file').click()">
@@ -245,6 +263,7 @@ async function cargarTodo(){
     const r = await (await fetch('/api/reposicion-actual')).json();
     repActual = r.reposicion;
     facturas = (r.facturas||[]).map(mapFacturaDB);
+    ordenarFacturas();
     document.getElementById('cfgFondo').value = Number(repActual.fondo).toFixed(2);
     document.getElementById('cfgLimite').value = Number(repActual.limite_comida).toFixed(2);
   }catch(e){ console.warn('reposicion:', e); }
@@ -265,6 +284,27 @@ function formatFecha(d){
   if(isNaN(dt)) return d;
   const dd=String(dt.getDate()).padStart(2,'0'), mm=String(dt.getMonth()+1).padStart(2,'0');
   return `${dd}/${mm}/${dt.getFullYear()}`;
+}
+
+// Convierte 'dd/mm/aaaa' a un número comparable (aaaammdd). Fechas vacías/inválidas
+// devuelven un valor alto para que queden al final de forma predecible.
+function fechaOrden(str){
+  if(!str) return 99999999;
+  const p = str.split('/');
+  if(p.length !== 3) return 99999999;
+  const [dd, mm, aa] = p;
+  const n = parseInt(aa+mm.padStart(2,'0')+dd.padStart(2,'0'), 10);
+  return isNaN(n) ? 99999999 : n;
+}
+
+// Ordena el array 'facturas' en su lugar por fecha ascendente (empates por id).
+// Al ordenar el array real, los índices de la tabla siguen siendo válidos.
+function ordenarFacturas(){
+  facturas.sort((a,b)=>{
+    const fa = fechaOrden(a.fecha), fb = fechaOrden(b.fecha);
+    if(fa !== fb) return fa - fb;
+    return (a.id||0) - (b.id||0);
+  });
 }
 
 // ---------- Lectura del PDF con pdf.js ----------
@@ -408,6 +448,7 @@ async function recargarFacturas(){
   const r = await (await fetch('/api/reposicion-actual')).json();
   repActual = r.reposicion;
   facturas = (r.facturas||[]).map(mapFacturaDB);
+  ordenarFacturas();
 }
 
 // ---------- Render ----------
@@ -476,6 +517,7 @@ function render(){
   document.getElementById('tSaldo').textContent = money(fondo - gastado);
   document.getElementById('tCount').textContent = facturas.length;
   document.querySelector('.celda.saldo').classList.toggle('neg', (fondo-gastado) < 0);
+  actualizarDashboard();
 
   const cont = document.getElementById('contenedorTabla');
   if(!facturas.length){
@@ -692,8 +734,13 @@ function abrirManual(){
     CATALOGO_CC.map(c=>`<option value="${c.codigo}">${c.codigo}</option>`).join('');
   document.getElementById('mProy').innerHTML =
     CATALOGO_PROYECTOS.map(p=>`<option value="${p.codigo}">${p.codigo}</option>`).join('');
-  // Limpiar campos
-  ['mFecha','mEmisor','mRuc','mNumero','mTotal'].forEach(id=>document.getElementById(id).value='');
+  // Limpiar campos y marcas de OCR
+  ['mFecha','mEmisor','mRuc','mNumero','mTotal'].forEach(id=>{
+    const el = document.getElementById(id);
+    el.value = '';
+    el.style.background = '';
+    el.style.borderColor = '';
+  });
   document.getElementById('mComida').value = 'MERIENDA';
   document.getElementById('mSinIva').checked = false;
   document.getElementById('ocrLabel').textContent = '📷 Subir foto/escaneo (opcional)';
@@ -749,32 +796,48 @@ async function pdfPrimeraPaginaImg(file){
 }
 
 // Extrae lo legible del texto OCR y prellena el formulario
+function setCampo(id, valor){
+  const el = document.getElementById(id);
+  el.value = valor;
+  el.style.background = '#fffbe6';       // marca amarilla: viene del OCR, revísalo
+  el.style.borderColor = 'var(--oro)';
+}
+
 function prellenarDesdeOCR(txt){
-  const T = (txt||'').toUpperCase();
   let m;
   // RUC (13 dígitos)
-  m = txt.match(/\b(\d{13})\b/);
-  if(m) document.getElementById('mRuc').value = m[1];
-  // No. documento tipo 002-001-000003968 o 002-001-0003968
-  m = txt.match(/\b(\d{3}-\d{3}-\d{6,9})\b/) || txt.match(/(\d{3})[-\s]*(\d{3})[-\s]*(\d{6,9})/);
-  if(m) document.getElementById('mNumero').value = m[0].replace(/\s/g,'');
-  // Emisor: buscar líneas con palabras de negocio de comida
+  const ruc = txt.match(/\b(\d{13})\b/);
+  if(ruc) setCampo('mRuc', ruc[1]);
+  // No. documento: 002-001-000003968 (NO debe ser el mismo que el RUC)
+  m = txt.match(/\b(\d{3}-\d{3}-\d{6,9})\b/);
+  if(!m){
+    const m2 = txt.match(/(\d{3})[-\s]+(\d{3})[-\s]+(\d{4,9})/);
+    if(m2) m = [m2[1]+'-'+m2[2]+'-'+m2[3].padStart(9,'0')];
+  }
+  if(m && (!ruc || m[0] !== ruc[1])) setCampo('mNumero', m[0].replace(/\s/g,''));
+  // Emisor: línea con palabra de negocio de comida
   const lineas = (txt||'').split('\n').map(l=>l.trim()).filter(Boolean);
   for(const l of lineas){
-    if(/asadero|restaurant|chifa|pollo|parrilla|comida|cafeteria|marisqueria|picanteria|fritada|hornado/i.test(l)){
-      document.getElementById('mEmisor').value = l.replace(/["“”]/g,'').slice(0,60);
+    if(/asadero|restaurant|chifa|pollo|parrilla|comida|cafeteria|marisqueria|picanteria|fritada|hornado|cevicheria|heladeria|panaderia|sanduche|burger|pizza/i.test(l)){
+      setCampo('mEmisor', l.replace(/["“”]/g,'').slice(0,60));
       break;
     }
   }
-  // Si detecta indicio de comida, sugerir según nada especial -> MERIENDA por defecto ya está
   // Fecha dd/mm/aaaa
-  m = txt.match(/\b(\d{2}\/\d{2}\/\d{4})\b/);
-  if(m) document.getElementById('mFecha').value = m[1];
+  const fe = txt.match(/\b(\d{2}\/\d{2}\/\d{4})\b/);
+  if(fe) setCampo('mFecha', fe[1]);
 }
 
 async function guardarManual(){
   const total = parseFloat(document.getElementById('mTotal').value) || 0;
   if(!total){ alert('Escribe el total de la nota.'); return; }
+  const fechaTxt = document.getElementById('mFecha').value.trim();
+  // Validar formato dd/mm/aaaa para que la factura se ubique bien en el orden
+  if(!/^\d{2}\/\d{2}\/\d{4}$/.test(fechaTxt)){
+    alert('Escribe la fecha en formato dd/mm/aaaa (ej: 14/08/2026).\nEs necesaria para ordenar la factura correctamente.');
+    document.getElementById('mFecha').focus();
+    return;
+  }
   const comida = document.getElementById('mComida').value;
   const sinIva = document.getElementById('mSinIva').checked;
   const iva = sinIva ? 0 : +(total - total/1.15).toFixed(2);
@@ -803,6 +866,74 @@ async function guardarManual(){
     cerrarManual();
     render();
   }catch(e){ alert('Error guardando: '+e.message); }
+}
+
+// ============================================================
+//  Dashboard: gasto por código de proyecto
+// ============================================================
+let chartProy = null;
+let dashVisible = true;
+
+const COLORES_DASH = ['#1b6b4f','#c9a24b','#3d7ea6','#b5341f','#7d5ba6','#d68438',
+                      '#5c8a3a','#2b6b7a','#a63d6a','#6b6b6b'];
+
+function actualizarDashboard(){
+  const dash = document.getElementById('dashboard');
+  if(!facturas.length){ dash.style.display = 'none'; return; }
+  dash.style.display = 'block';
+
+  // Agrupar gasto por código de proyecto
+  const porProy = {};
+  facturas.forEach(f=>{
+    const cod = f.codigo_proyecto || 'ADM000';
+    porProy[cod] = (porProy[cod] || 0) + (Number(f.total)||0);
+  });
+  const labels = Object.keys(porProy).sort();
+  const datos = labels.map(l=>+porProy[l].toFixed(2));
+  const total = datos.reduce((a,b)=>a+b,0);
+  const colores = labels.map((_,i)=>COLORES_DASH[i % COLORES_DASH.length]);
+
+  // Gráfico de dona
+  if(!window.Chart){ return; }
+  const ctx = document.getElementById('chartProy');
+  if(chartProy) chartProy.destroy();
+  chartProy = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: datos, backgroundColor: colores, borderWidth: 2, borderColor:'#fff' }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels:{ font:{size:11}, padding:10 } },
+        tooltip: { callbacks: { label: c=>` ${c.label}: $${c.parsed.toFixed(2)} (${(c.parsed/total*100).toFixed(1)}%)` } }
+      }
+    }
+  });
+
+  // Tabla resumen al lado
+  const nombres = {};
+  CATALOGO_PROYECTOS.forEach(p=> nombres[p.codigo] = p.nombre);
+  let html = '<table style="width:100%;border-collapse:collapse">';
+  labels.forEach((l,i)=>{
+    const pct = (datos[i]/total*100).toFixed(1);
+    html += `<tr style="border-bottom:1px solid var(--linea)">
+      <td style="padding:7px 4px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;
+        background:${colores[i]};margin-right:6px"></span>${l}</td>
+      <td style="padding:7px 4px;font-size:11px;color:var(--tinta-suave)">${nombres[l]||''}</td>
+      <td style="padding:7px 4px;text-align:right;font-weight:600" class="num">$${datos[i].toFixed(2)}</td>
+      <td style="padding:7px 4px;text-align:right;font-size:11px;color:var(--tinta-suave)">${pct}%</td>
+    </tr>`;
+  });
+  html += `<tr style="border-top:2px solid var(--tinta)">
+    <td colspan="2" style="padding:8px 4px;font-weight:700">TOTAL</td>
+    <td style="padding:8px 4px;text-align:right;font-weight:700" class="num">$${total.toFixed(2)}</td>
+    <td style="padding:8px 4px;text-align:right;font-weight:700">100%</td></tr></table>`;
+  document.getElementById('dashTabla').innerHTML = html;
+}
+
+function toggleDash(){
+  dashVisible = !dashVisible;
+  document.getElementById('dashGrid').style.display = dashVisible ? 'grid' : 'none';
+  document.getElementById('dashToggle').textContent = dashVisible ? 'Ocultar' : 'Mostrar';
 }
 
 cargarTodo();

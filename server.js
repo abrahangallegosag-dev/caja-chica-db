@@ -64,7 +64,7 @@ app.get('/api/reposicion-actual', async (req, res) => {
   try {
     const rep = await getOrCreateAbierta();
     const f = await pool.query(
-      'SELECT * FROM facturas WHERE reposicion_id=$1 ORDER BY fecha, id', [rep.id]);
+      'SELECT * FROM facturas WHERE reposicion_id=$1 ORDER BY fecha ASC NULLS LAST, id ASC', [rep.id]);
     res.json({ reposicion: rep, facturas: f.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
