@@ -125,10 +125,56 @@ app.delete('/api/facturas/:id', async (req, res) => {
 app.get('/api/historial', async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT r.*, COUNT(f.id) AS n_facturas, COALESCE(SUM(f.total),0) AS total_gastado
+      `SELECT r.id, r.responsable, r.fondo, r.limite_comida, r.estado,
+              r.creado_en, r.cerrado_en,
+              COUNT(f.id) AS n_facturas, COALESCE(SUM(f.total),0) AS total_gastado
        FROM reposiciones r LEFT JOIN facturas f ON f.reposicion_id=r.id
-       GROUP BY r.id ORDER BY r.creado_en DESC`);
+       WHERE r.estado='cerrada'
+       GROUP BY r.id, r.responsable, r.fondo, r.limite_comida, r.estado, r.creado_en, r.cerrado_en
+       ORDER BY r.cerrado_en DESC NULLS LAST, r.id DESC`);
     res.json({ historial: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Detalle (facturas) de una reposición específica
+app.get('/api/reposicion/:id', async (req, res) => {
+  try {
+    const rep = await pool.query('SELECT * FROM reposiciones WHERE id=$1', [req.params.id]);
+    const f = await pool.query(
+      'SELECT * FROM facturas WHERE reposicion_id=$1 ORDER BY fecha ASC NULLS LAST, id ASC',
+      [req.params.id]);
+    res.json({ reposicion: rep.rows[0], facturas: f.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Gasto acumulado por código de proyecto (todas las reposiciones)
+app.get('/api/dashboard-acumulado', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT codigo_proyecto, COALESCE(SUM(total),0) AS total, COUNT(*) AS n
+       FROM facturas GROUP BY codigo_proyecto ORDER BY total DESC`);
+    res.json({ porProyecto: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Gasto por centro de costo (CC)
+app.get('/api/dashboard-cc', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT cc, COALESCE(SUM(total),0) AS total, COUNT(*) AS n
+       FROM facturas GROUP BY cc ORDER BY total DESC`);
+    res.json({ porCC: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Gasto por mes (año-mes)
+app.get('/api/dashboard-mes', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT TO_CHAR(fecha, 'YYYY-MM') AS mes, COALESCE(SUM(total),0) AS total, COUNT(*) AS n
+       FROM facturas WHERE fecha IS NOT NULL
+       GROUP BY TO_CHAR(fecha, 'YYYY-MM') ORDER BY mes`);
+    res.json({ porMes: r.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

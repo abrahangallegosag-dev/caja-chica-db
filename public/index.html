@@ -34,6 +34,14 @@
 
   .wrap{max-width:1080px;margin:0 auto;padding:24px}
 
+  .tabs{display:flex;gap:6px;margin-bottom:22px;border-bottom:2px solid var(--linea)}
+  .tab{font-family:inherit;font-size:14px;font-weight:600;padding:11px 20px;border:none;background:none;
+    cursor:pointer;color:var(--tinta-suave);border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s}
+  .tab:hover{color:var(--tinta)}
+  .tab.activa{color:var(--tesoro);border-bottom-color:var(--tesoro)}
+  .panel{background:#fff;border:1px solid var(--linea);border-radius:12px;padding:18px 20px;margin-bottom:22px}
+  .panel-t{font-size:15px;margin-bottom:14px}
+
   .config-bar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:22px;
     background:#fff;border:1px solid var(--linea);border-radius:10px;padding:12px 16px}
   .config-bar .campo{display:flex;align-items:center;gap:8px}
@@ -124,11 +132,19 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 3.4</div>
+    <div style="font-size:12px;color:#7d867f">Versión 3.6</div>
   </div>
 </header>
 
 <div class="wrap">
+
+  <div class="tabs">
+    <button class="tab activa" id="tabFacturas" onclick="cambiarTab('facturas')">📋 Facturas</button>
+    <button class="tab" id="tabDashboard" onclick="cambiarTab('dashboard')">📊 Dashboard</button>
+  </div>
+
+  <!-- ===== VISTA FACTURAS ===== -->
+  <div id="vistaFacturas">
 
   <div class="config-bar">
     <div class="campo"><label>Fondo asignado</label>
@@ -143,21 +159,6 @@
     <div class="celda exc"><div class="et">Excedente</div><div class="vl num" id="tExc">$0.00</div></div>
     <div class="celda saldo"><div class="et">Saldo</div><div class="vl num" id="tSaldo">$250.00</div></div>
     <div class="celda"><div class="et">Comprobantes</div><div class="vl num" id="tCount">0</div></div>
-  </div>
-
-  <!-- Dashboard: gasto por código de proyecto -->
-  <div id="dashboard" style="display:none;background:#fff;border:1px solid var(--linea);border-radius:12px;
-       padding:18px 20px;margin-bottom:24px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <h2 style="font-size:15px">Gasto por código de proyecto</h2>
-      <button class="btn btn-sec" style="font-size:12px;padding:6px 12px" onclick="toggleDash()">
-        <span id="dashToggle">Ocultar</span>
-      </button>
-    </div>
-    <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:center" id="dashGrid">
-      <div style="position:relative;height:220px"><canvas id="chartProy"></canvas></div>
-      <div id="dashTabla" style="font-size:13px"></div>
-    </div>
   </div>
 
   <div class="dropzone" id="dropzone" onclick="document.getElementById('file').click()">
@@ -183,6 +184,39 @@
   </div>
 
   <p class="aviso">Los comprobantes se guardan en la base de datos de Security Data.</p>
+  </div><!-- fin vistaFacturas -->
+
+  <!-- ===== VISTA DASHBOARD ===== -->
+  <div id="vistaDashboard" style="display:none">
+
+    <!-- Pastel: gasto por código de proyecto -->
+    <div class="panel">
+      <h2 class="panel-t">Gasto por código de proyecto</h2>
+      <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:20px;align-items:center">
+        <div style="position:relative;height:240px"><canvas id="chartProy"></canvas></div>
+        <div id="dashTabla" style="font-size:13px"></div>
+      </div>
+    </div>
+
+    <!-- Barras: gasto por centro de costo -->
+    <div class="panel">
+      <h2 class="panel-t">Gasto por centro de costo (CC)</h2>
+      <div style="position:relative;height:220px"><canvas id="chartCC"></canvas></div>
+    </div>
+
+    <!-- Línea: gasto por mes -->
+    <div class="panel">
+      <h2 class="panel-t">Gasto por mes</h2>
+      <div style="position:relative;height:220px"><canvas id="chartMes"></canvas></div>
+    </div>
+
+    <!-- Historial de reposiciones -->
+    <div class="panel">
+      <h2 class="panel-t">Historial de reposiciones</h2>
+      <div id="histLista" style="font-size:13px"></div>
+    </div>
+
+  </div><!-- fin vistaDashboard -->
 </div>
 
 <!-- Modal de captura manual / escaneada -->
@@ -286,14 +320,13 @@ function formatFecha(d){
   return `${dd}/${mm}/${dt.getFullYear()}`;
 }
 
-// Convierte 'dd/mm/aaaa' a un número comparable (aaaammdd). Fechas vacías/inválidas
-// devuelven un valor alto para que queden al final de forma predecible.
+// Convierte 'd/m/aaaa' o 'dd/mm/aaaa' a un número comparable (aaaammdd).
 function fechaOrden(str){
   if(!str) return 99999999;
   const p = str.split('/');
   if(p.length !== 3) return 99999999;
-  const [dd, mm, aa] = p;
-  const n = parseInt(aa+mm.padStart(2,'0')+dd.padStart(2,'0'), 10);
+  const dd = p[0].padStart(2,'0'), mm = p[1].padStart(2,'0'), aa = p[2];
+  const n = parseInt(aa+mm+dd, 10);
   return isNaN(n) ? 99999999 : n;
 }
 
@@ -441,7 +474,8 @@ function fechaISO(str){
   if(!str) return null;
   const p = str.split('/');
   if(p.length!==3) return null;
-  return `${p[2]}-${p[1]}-${p[0]}`;
+  const dd = p[0].padStart(2,'0'), mm = p[1].padStart(2,'0'), aa = p[2];
+  return `${aa}-${mm}-${dd}`;
 }
 
 async function recargarFacturas(){
@@ -517,7 +551,6 @@ function render(){
   document.getElementById('tSaldo').textContent = money(fondo - gastado);
   document.getElementById('tCount').textContent = facturas.length;
   document.querySelector('.celda.saldo').classList.toggle('neg', (fondo-gastado) < 0);
-  actualizarDashboard();
 
   const cont = document.getElementById('contenedorTabla');
   if(!facturas.length){
@@ -723,6 +756,16 @@ async function exportar(){
   a.download = `SD-FO-AF-03_Reposicion_CajaChica_${hoy.toISOString().slice(0,10).replace(/-/g,'')}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
+
+  // Archivar esta reposición en el historial y empezar una nueva
+  if(confirm('Excel descargado.\n\n¿Archivar esta reposición en el historial y empezar una nueva?\n(Las facturas actuales quedan guardadas en el historial.)')){
+    try{
+      await fetch('/api/reposicion-actual/cerrar', {method:'POST'});
+      await recargarFacturas();   // ahora crea/lee una reposición nueva vacía
+      render();
+      cargarDashboard();
+    }catch(e){ alert('No se pudo archivar: '+e.message); }
+  }
 }
 
 // ============================================================
@@ -798,9 +841,7 @@ async function pdfPrimeraPaginaImg(file){
 // Extrae lo legible del texto OCR y prellena el formulario
 function setCampo(id, valor){
   const el = document.getElementById(id);
-  el.value = valor;
-  el.style.background = '#fffbe6';       // marca amarilla: viene del OCR, revísalo
-  el.style.borderColor = 'var(--oro)';
+  el.value = valor;   // valor real, editable y guardable
 }
 
 function prellenarDesdeOCR(txt){
@@ -832,9 +873,9 @@ async function guardarManual(){
   const total = parseFloat(document.getElementById('mTotal').value) || 0;
   if(!total){ alert('Escribe el total de la nota.'); return; }
   const fechaTxt = document.getElementById('mFecha').value.trim();
-  // Validar formato dd/mm/aaaa para que la factura se ubique bien en el orden
-  if(!/^\d{2}\/\d{2}\/\d{4}$/.test(fechaTxt)){
-    alert('Escribe la fecha en formato dd/mm/aaaa (ej: 14/08/2026).\nEs necesaria para ordenar la factura correctamente.');
+  // Acepta d/m/aaaa o dd/mm/aaaa
+  if(!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fechaTxt)){
+    alert('Escribe la fecha en formato día/mes/año (ej: 13/8/2026 o 13/08/2026).');
     document.getElementById('mFecha').focus();
     return;
   }
@@ -869,71 +910,141 @@ async function guardarManual(){
 }
 
 // ============================================================
-//  Dashboard: gasto por código de proyecto
+//  Pestañas y Dashboard
 // ============================================================
-let chartProy = null;
-let dashVisible = true;
+let chartProy = null, chartCC = null, chartMes = null;
 
 const COLORES_DASH = ['#1b6b4f','#c9a24b','#3d7ea6','#b5341f','#7d5ba6','#d68438',
                       '#5c8a3a','#2b6b7a','#a63d6a','#6b6b6b'];
 
-function actualizarDashboard(){
-  const dash = document.getElementById('dashboard');
-  if(!facturas.length){ dash.style.display = 'none'; return; }
-  dash.style.display = 'block';
+function cambiarTab(tab){
+  const esFact = tab === 'facturas';
+  document.getElementById('vistaFacturas').style.display = esFact ? 'block' : 'none';
+  document.getElementById('vistaDashboard').style.display = esFact ? 'none' : 'block';
+  document.getElementById('tabFacturas').classList.toggle('activa', esFact);
+  document.getElementById('tabDashboard').classList.toggle('activa', !esFact);
+  if(!esFact) cargarDashboard();   // refrescar datos al entrar
+}
 
-  // Agrupar gasto por código de proyecto
-  const porProy = {};
-  facturas.forEach(f=>{
-    const cod = f.codigo_proyecto || 'ADM000';
-    porProy[cod] = (porProy[cod] || 0) + (Number(f.total)||0);
-  });
+async function cargarDashboard(){
+  await Promise.all([graficoProyecto(), graficoCC(), graficoMes(), cargarHistorial()]);
+}
+
+async function graficoProyecto(){
+  let porProy = {};
+  try{
+    const r = await (await fetch('/api/dashboard-acumulado')).json();
+    (r.porProyecto||[]).forEach(row=> porProy[row.codigo_proyecto||'ADM000'] = Number(row.total)||0);
+  }catch(e){}
   const labels = Object.keys(porProy).sort();
   const datos = labels.map(l=>+porProy[l].toFixed(2));
-  const total = datos.reduce((a,b)=>a+b,0);
+  const total = datos.reduce((a,b)=>a+b,0) || 1;
   const colores = labels.map((_,i)=>COLORES_DASH[i % COLORES_DASH.length]);
 
-  // Gráfico de dona
-  if(!window.Chart){ return; }
-  const ctx = document.getElementById('chartProy');
-  if(chartProy) chartProy.destroy();
-  chartProy = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels, datasets: [{ data: datos, backgroundColor: colores, borderWidth: 2, borderColor:'#fff' }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels:{ font:{size:11}, padding:10 } },
-        tooltip: { callbacks: { label: c=>` ${c.label}: $${c.parsed.toFixed(2)} (${(c.parsed/total*100).toFixed(1)}%)` } }
-      }
-    }
-  });
-
-  // Tabla resumen al lado
+  if(window.Chart){
+    const ctx = document.getElementById('chartProy');
+    if(chartProy) chartProy.destroy();
+    chartProy = new Chart(ctx, {
+      type:'doughnut',
+      data:{ labels, datasets:[{ data:datos, backgroundColor:colores, borderWidth:2, borderColor:'#fff' }] },
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{
+        legend:{ position:'bottom', labels:{ font:{size:11}, padding:10 } },
+        tooltip:{ callbacks:{ label:c=>` ${c.label}: $${c.parsed.toFixed(2)} (${(c.parsed/total*100).toFixed(1)}%)` } }
+      }}
+    });
+  }
+  // Tabla resumen
   const nombres = {};
   CATALOGO_PROYECTOS.forEach(p=> nombres[p.codigo] = p.nombre);
   let html = '<table style="width:100%;border-collapse:collapse">';
   labels.forEach((l,i)=>{
-    const pct = (datos[i]/total*100).toFixed(1);
     html += `<tr style="border-bottom:1px solid var(--linea)">
       <td style="padding:7px 4px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;
         background:${colores[i]};margin-right:6px"></span>${l}</td>
       <td style="padding:7px 4px;font-size:11px;color:var(--tinta-suave)">${nombres[l]||''}</td>
       <td style="padding:7px 4px;text-align:right;font-weight:600" class="num">$${datos[i].toFixed(2)}</td>
-      <td style="padding:7px 4px;text-align:right;font-size:11px;color:var(--tinta-suave)">${pct}%</td>
+      <td style="padding:7px 4px;text-align:right;font-size:11px;color:var(--tinta-suave)">${(datos[i]/total*100).toFixed(1)}%</td>
     </tr>`;
   });
   html += `<tr style="border-top:2px solid var(--tinta)">
     <td colspan="2" style="padding:8px 4px;font-weight:700">TOTAL</td>
     <td style="padding:8px 4px;text-align:right;font-weight:700" class="num">$${total.toFixed(2)}</td>
     <td style="padding:8px 4px;text-align:right;font-weight:700">100%</td></tr></table>`;
-  document.getElementById('dashTabla').innerHTML = html;
+  document.getElementById('dashTabla').innerHTML = html || '';
 }
 
-function toggleDash(){
-  dashVisible = !dashVisible;
-  document.getElementById('dashGrid').style.display = dashVisible ? 'grid' : 'none';
-  document.getElementById('dashToggle').textContent = dashVisible ? 'Ocultar' : 'Mostrar';
+async function graficoCC(){
+  let datos = [];
+  try{
+    const r = await (await fetch('/api/dashboard-cc')).json();
+    datos = r.porCC || [];
+  }catch(e){}
+  const labels = datos.map(d=>d.cc || '—');
+  const valores = datos.map(d=>+Number(d.total).toFixed(2));
+  if(window.Chart){
+    const ctx = document.getElementById('chartCC');
+    if(chartCC) chartCC.destroy();
+    chartCC = new Chart(ctx, {
+      type:'bar',
+      data:{ labels, datasets:[{ label:'Gasto ($)', data:valores,
+        backgroundColor:labels.map((_,i)=>COLORES_DASH[i % COLORES_DASH.length]) }] },
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false },
+        tooltip:{ callbacks:{ label:c=>` $${c.parsed.y.toFixed(2)}` } } },
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:v=>'$'+v } } } }
+    });
+  }
+}
+
+async function graficoMes(){
+  let datos = [];
+  try{
+    const r = await (await fetch('/api/dashboard-mes')).json();
+    datos = r.porMes || [];
+  }catch(e){}
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const labels = datos.map(d=>{ const [a,m]=d.mes.split('-'); return `${meses[parseInt(m,10)-1]} ${a}`; });
+  const valores = datos.map(d=>+Number(d.total).toFixed(2));
+  if(window.Chart){
+    const ctx = document.getElementById('chartMes');
+    if(chartMes) chartMes.destroy();
+    chartMes = new Chart(ctx, {
+      type:'line',
+      data:{ labels, datasets:[{ label:'Gasto ($)', data:valores, fill:true,
+        borderColor:'#1b6b4f', backgroundColor:'rgba(27,107,79,.12)', tension:.3, pointRadius:4 }] },
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false },
+        tooltip:{ callbacks:{ label:c=>` $${c.parsed.y.toFixed(2)}` } } },
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:v=>'$'+v } } } }
+    });
+  }
+}
+
+async function cargarHistorial(){
+  try{
+    const r = await (await fetch('/api/historial')).json();
+    const hist = r.historial || [];
+    if(!hist.length){
+      document.getElementById('histLista').innerHTML =
+        '<p style="color:var(--tinta-suave);font-size:13px">Aún no hay reposiciones archivadas. Se archivan al exportar el Excel.</p>';
+      return;
+    }
+    let html = '<table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="border-bottom:2px solid var(--tinta)">' +
+      '<th style="text-align:left;padding:8px 4px;font-size:11px">FECHA CIERRE</th>' +
+      '<th style="text-align:left;padding:8px 4px;font-size:11px">RESPONSABLE</th>' +
+      '<th style="text-align:right;padding:8px 4px;font-size:11px">COMPROBANTES</th>' +
+      '<th style="text-align:right;padding:8px 4px;font-size:11px">TOTAL</th></tr></thead><tbody>';
+    hist.forEach(h=>{
+      const fc = h.cerrado_en ? new Date(h.cerrado_en).toLocaleDateString('es-EC') : '—';
+      html += `<tr style="border-bottom:1px solid var(--linea)">
+        <td style="padding:7px 4px">${fc}</td>
+        <td style="padding:7px 4px">${h.responsable||''}</td>
+        <td style="padding:7px 4px;text-align:right">${h.n_facturas}</td>
+        <td style="padding:7px 4px;text-align:right;font-weight:600" class="num">$${Number(h.total_gastado).toFixed(2)}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('histLista').innerHTML = html;
+  }catch(e){ console.warn('historial:', e); }
 }
 
 cargarTodo();
