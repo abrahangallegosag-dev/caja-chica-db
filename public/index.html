@@ -132,7 +132,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 4.1</div>
+    <div style="font-size:12px;color:#7d867f">Versión 4.3</div>
   </div>
 </header>
 
@@ -249,14 +249,21 @@
       <div class="mcampo"><label>RUC</label><input id="mRuc" autocomplete="off"></div>
       <div class="mcampo"><label>No. Documento</label><input id="mNumero" autocomplete="off"></div>
       <div class="mcampo"><label>Descripción</label>
-        <select id="mComida">
+        <select id="mComida" onchange="toggleOtro('mComida','mComidaOtro')">
           <option>MERIENDA</option><option>ALMUERZO</option><option>DESAYUNO</option>
-          <option>AGUA</option><option>REVISAR CONCEPTO</option>
+          <option>AGUA</option><option>REVISAR CONCEPTO</option><option>OTROS</option>
         </select>
+        <input id="mComidaOtro" autocomplete="off" placeholder="Escribe la descripción" style="display:none;margin-top:6px">
       </div>
       <div class="mcampo"><label>Total ($)</label><input id="mTotal" type="number" step="0.01" autocomplete="off"></div>
-      <div class="mcampo"><label>CC</label><select id="mCC"></select></div>
-      <div class="mcampo"><label>Código Proyecto</label><select id="mProy"></select></div>
+      <div class="mcampo"><label>CC</label>
+        <select id="mCC" onchange="toggleOtro('mCC','mCCOtro')"></select>
+        <input id="mCCOtro" autocomplete="off" placeholder="Escribe el CC" style="display:none;margin-top:6px">
+      </div>
+      <div class="mcampo"><label>Código Proyecto</label>
+        <select id="mProy" onchange="toggleOtro('mProy','mProyOtro')"></select>
+        <input id="mProyOtro" autocomplete="off" placeholder="Escribe el código" style="display:none;margin-top:6px">
+      </div>
       <div class="mcampo" style="grid-column:1/-1">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
           <input type="checkbox" id="mSinIva" style="width:auto"> Sin IVA (nota de venta / RIMPE / artesano)
@@ -573,15 +580,25 @@ function render(){
 
   const OPCIONES = ['MERIENDA','ALMUERZO','DESAYUNO','AGUA','REVISAR CONCEPTO'];
 
+  // Genera las <option> de un selector, incluye el valor actual aunque no esté
+  // en la lista (valor personalizado escrito con OTROS), y agrega OTROS al final.
+  function opciones(lista, valActual){
+    let ops = lista.slice();
+    if(valActual && !ops.includes(valActual)) ops.push(valActual);   // valor personalizado
+    let html = ops.map(o=>`<option ${valActual===o?'selected':''}>${o}</option>`).join('');
+    html += `<option value="__OTROS__">OTROS…</option>`;
+    return html;
+  }
+
   const filas = facturas.map((f,idx)=>{
     const d = derivar(f);
     const exc = d.excedente;
     const revisar = f.comida === 'REVISAR CONCEPTO';
-    const ops = OPCIONES.map(o=>`<option ${f.comida===o?'selected':''}>${o}</option>`).join('');
+    const ops = opciones(OPCIONES, f.comida);
     const ccVal = f.cc || 'ISLA';
     const proyVal = f.codigo_proyecto || 'ADM000';
-    const opsCC = CATALOGO_CC.map(c=>`<option value="${c.codigo}" ${ccVal===c.codigo?'selected':''}>${c.codigo}</option>`).join('');
-    const opsProy = CATALOGO_PROYECTOS.map(p=>`<option value="${p.codigo}" ${proyVal===p.codigo?'selected':''}>${p.codigo}</option>`).join('');
+    const opsCC = opciones(CATALOGO_CC.map(c=>c.codigo), ccVal);
+    const opsProy = opciones(CATALOGO_PROYECTOS.map(p=>p.codigo), proyVal);
     return `<tr class="${exc>0?'exc':''}">
       <td class="meta">${f.fecha||'—'}</td>
       <td>
@@ -589,11 +606,11 @@ function render(){
                onchange="editar(${idx},'emisor',this.value)">
       </td>
       <td>
-        <select class="edit selcomida ${revisar?'revisar':''}" onchange="editar(${idx},'comida',this.value)">${ops}</select>
+        <select class="edit selcomida ${revisar?'revisar':''}" onchange="editarSel(${idx},'comida',this)">${ops}</select>
       </td>
       <td class="meta doc">${f.numero||'—'}</td>
-      <td><select class="edit selcc" onchange="editar(${idx},'cc',this.value)">${opsCC}</select></td>
-      <td><select class="edit selproy" onchange="editar(${idx},'codigo_proyecto',this.value)">${opsProy}</select></td>
+      <td><select class="edit selcc" onchange="editarSel(${idx},'cc',this)">${opsCC}</select></td>
+      <td><select class="edit selproy" onchange="editarSel(${idx},'codigo_proyecto',this)">${opsProy}</select></td>
       <td class="der num">${d.sub0?money(d.sub0):'—'}</td>
       <td class="der num">${d.sub15?money(d.sub15):'—'}</td>
       <td class="der num">${money(d.descuento)}</td>
@@ -630,6 +647,21 @@ function editar(i, campo, val){
   if(campo === 'comida') facturas[i].excedente = calcExcedente(facturas[i]);
   guardarFacturaDB(facturas[i]);
   render();
+}
+// Maneja los selectores de la tabla: si eligen "OTROS…", pide el texto a mano.
+function editarSel(i, campo, sel){
+  let val = sel.value;
+  if(val === '__OTROS__'){
+    const escrito = prompt('Escribe el valor para ' +
+      (campo==='comida'?'la descripción':campo==='cc'?'el CC':'el código de proyecto') + ':', '');
+    if(escrito && escrito.trim()){
+      val = escrito.trim().toUpperCase();
+    } else {
+      render();   // canceló: redibujar para revertir el selector
+      return;
+    }
+  }
+  editar(i, campo, val);
 }
 function editarTotal(i, val){
   facturas[i].total = parseFloat(val) || 0;
@@ -782,11 +814,15 @@ async function exportar(){
 //  Captura manual / escaneada (con OCR opcional)
 // ============================================================
 function abrirManual(){
-  // Llenar selectores de CC y proyecto desde el catálogo
+  // Llenar selectores de CC y proyecto desde el catálogo, con OTROS al final
   document.getElementById('mCC').innerHTML =
-    CATALOGO_CC.map(c=>`<option value="${c.codigo}">${c.codigo}</option>`).join('');
+    CATALOGO_CC.map(c=>`<option value="${c.codigo}">${c.codigo}</option>`).join('') +
+    '<option value="OTROS">OTROS</option>';
   document.getElementById('mProy').innerHTML =
-    CATALOGO_PROYECTOS.map(p=>`<option value="${p.codigo}">${p.codigo}</option>`).join('');
+    CATALOGO_PROYECTOS.map(p=>`<option value="${p.codigo}">${p.codigo}</option>`).join('') +
+    '<option value="OTROS">OTROS</option>';
+  // Ocultar campos "otro" y limpiarlos
+  ['mComidaOtro','mCCOtro','mProyOtro'].forEach(id=>{ const e=document.getElementById(id); if(e){ e.style.display='none'; e.value=''; } });
   // Limpiar campos y marcas de OCR
   ['mFecha','mEmisor','mRuc','mNumero','mTotal'].forEach(id=>{
     const el = document.getElementById(id);
@@ -809,6 +845,15 @@ function abrirManual(){
   });
 }
 function cerrarManual(){ document.getElementById('modalManual').style.display = 'none'; }
+
+// Muestra u oculta el campo de texto libre cuando se elige "OTROS"
+function toggleOtro(selectId, inputId){
+  const sel = document.getElementById(selectId);
+  const inp = document.getElementById(inputId);
+  if(!inp) return;
+  if(sel.value === 'OTROS'){ inp.style.display = 'block'; inp.focus(); }
+  else { inp.style.display = 'none'; inp.value = ''; }
+}
 
 // OCR opcional con Tesseract.js (se carga solo al usarlo)
 let tesseractCargado = false;
@@ -857,10 +902,7 @@ document.getElementById('fileOCR').addEventListener('change', async (ev)=>{
 function mostrarTextoConDudas(data){
   const cont = document.getElementById('ocrTexto');
   const UMBRAL = 70;   // menos de 70% de confianza = dudoso
-  let html = '';
   let symbols = [];
-
-  // Recorrer la estructura de Tesseract para juntar los símbolos (caracteres)
   try{
     (data.blocks||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>{
       (l.words||[]).forEach(w=>{
@@ -871,22 +913,22 @@ function mostrarTextoConDudas(data){
     })));
   }catch(e){}
 
-  if(symbols.length){
-    html = symbols.map(s=>{
-      const t = (s.text||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      if(t==='\n') return '<br>';
-      if((s.confidence||100) < UMBRAL)
-        return `<span style="color:#c0392b;font-weight:700;background:#fcdede">${t}</span>`;
-      return t;
-    }).join('');
-    cont.innerHTML = '<div style="font-size:10px;color:var(--tinta-suave);margin-bottom:6px;font-weight:600">TEXTO LEÍDO (lo rojo es dudoso, revísalo):</div>' + html;
-    cont.style.display = 'block';
-  } else {
-    // Si no hay símbolos disponibles, mostrar el texto plano
-    cont.innerHTML = '<div style="font-size:10px;color:var(--tinta-suave);margin-bottom:6px;font-weight:600">TEXTO LEÍDO:</div>' +
-      (data.text||'').replace(/</g,'&lt;');
-    cont.style.display = 'block';
+  // ¿Hay al menos un carácter dudoso? Si no, no mostramos el recuadro.
+  const hayDudas = symbols.some(s=> (s.confidence||100) < UMBRAL && (s.text||'').trim());
+  if(!symbols.length || !hayDudas){
+    cont.style.display = 'none';
+    return;
   }
+
+  const html = symbols.map(s=>{
+    const t = (s.text||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if(t==='\n') return '<br>';
+    if((s.confidence||100) < UMBRAL)
+      return `<span style="color:#c0392b;font-weight:700;background:#fcdede">${t}</span>`;
+    return t;
+  }).join('');
+  cont.innerHTML = '<div style="font-size:10px;color:var(--tinta-suave);margin-bottom:6px;font-weight:600">TEXTO LEÍDO (lo rojo es dudoso, revísalo):</div>' + html;
+  cont.style.display = 'block';
 }
 
 
@@ -1005,7 +1047,16 @@ async function guardarManual(){
     return;
   }
 
-  const comida = document.getElementById('mComida').value;
+  // Si se eligió OTROS, usar el texto escrito a mano
+  function valorSel(selId, otroId){
+    const sel = document.getElementById(selId);
+    if(sel.value === 'OTROS'){
+      const otro = document.getElementById(otroId).value.trim();
+      return otro || 'OTROS';
+    }
+    return sel.value;
+  }
+  const comida = valorSel('mComida','mComidaOtro');
   const sinIva = document.getElementById('mSinIva').checked;
   const iva = sinIva ? 0 : +(total - total/1.15).toFixed(2);
   const limite = parseFloat(document.getElementById('cfgLimite').value) || 5;
@@ -1015,8 +1066,8 @@ async function guardarManual(){
   const f = {
     fecha: fechaTxt, emisor, ruc, numero,
     comida, iva, total, excedente,
-    cc: document.getElementById('mCC').value,
-    codigo_proyecto: document.getElementById('mProy').value
+    cc: valorSel('mCC','mCCOtro'),
+    codigo_proyecto: valorSel('mProy','mProyOtro')
   };
   const payload = [{
     fecha: fechaISO(f.fecha), emisor: f.emisor, ruc: f.ruc, numero: f.numero,
