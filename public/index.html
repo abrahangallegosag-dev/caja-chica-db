@@ -132,7 +132,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 3.8</div>
+    <div style="font-size:12px;color:#7d867f">Versión 4.1</div>
   </div>
 </header>
 
@@ -237,6 +237,11 @@
     <div id="ocrEstado" style="display:none;font-size:12.5px;color:var(--tesoro);text-align:center;margin-bottom:12px">
       <span class="spinner" style="width:16px;height:16px"></span> Leyendo imagen…
     </div>
+
+    <!-- Texto leído por el OCR, con caracteres dudosos resaltados -->
+    <div id="ocrTexto" style="display:none;margin-bottom:14px;padding:10px 12px;background:#fafaf7;
+         border:1px solid var(--linea);border-radius:8px;font-size:12px;max-height:120px;overflow-y:auto;
+         line-height:1.7;white-space:pre-wrap;word-break:break-word"></div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" autocomplete="off">
       <div class="mcampo"><label>Fecha (dd/mm/aaaa)</label><input id="mFecha" autocomplete="off"></div>
@@ -762,8 +767,8 @@ async function exportar(){
   a.click();
   URL.revokeObjectURL(url);
 
-  // Archivar esta reposición en el historial y empezar una nueva
-  if(confirm('Excel descargado.\n\n¿Archivar esta reposición en el historial y empezar una nueva?\n(Las facturas actuales quedan guardadas en el historial.)')){
+  // Preguntar qué hacer con la tabla tras exportar
+  if(confirm('Excel descargado.\n\n¿Archivar esta reposición y LIMPIAR la tabla para empezar una nueva?\n\n• Aceptar: guarda todo en el historial y limpia la tabla.\n• Cancelar: deja las facturas como están.')){
     try{
       await fetch('/api/reposicion-actual/cerrar', {method:'POST'});
       await recargarFacturas();   // ahora crea/lee una reposición nueva vacía
@@ -823,25 +828,67 @@ document.getElementById('fileOCR').addEventListener('change', async (ev)=>{
   if(!file) return;
   const estado = document.getElementById('ocrEstado');
   estado.style.display = 'block';
+  document.getElementById('ocrTexto').style.display = 'none';
   try{
     await cargarTesseract();
-    // Si es PDF, convertirlo a imagen con pdf.js primero
     let imagen = file;
     if(file.type === 'application/pdf'){
       imagen = await pdfPrimeraPaginaImg(file);
     }
-    const { data } = await Tesseract.recognize(imagen, 'spa');
+    // createWorker con salida de bloques activada, para obtener la confianza
+    // por carácter (símbolos) y poder resaltar lo dudoso.
+    const worker = await Tesseract.createWorker('spa');
+    const { data } = await worker.recognize(imagen, {}, { blocks: true });
+    await worker.terminate();
     prellenarDesdeOCR(data.text);
+    mostrarTextoConDudas(data);
     document.getElementById('ocrLabel').innerHTML =
-      '<span style="color:#1b6b4f">✓ Verde = leído</span> · <span style="color:#c0392b">Rojo = complétalo a mano</span>';
+      '<span style="color:#1b6b4f">✓ Verde = leído</span> · <span style="color:#c0392b">Rojo = dudoso o faltante</span>';
   }catch(e){
     document.getElementById('ocrLabel').textContent = '⚠ No se pudo leer la imagen — llena todo a mano';
-    // marcar todos en rojo
     ['mFecha','mEmisor','mRuc','mNumero','mTotal'].forEach(marcarNoLeido);
   }finally{
     estado.style.display = 'none';
   }
 });
+
+// Muestra el texto leído por el OCR resaltando en rojo/negrita los caracteres
+// que el motor leyó con baja confianza (donde puede haberse equivocado).
+function mostrarTextoConDudas(data){
+  const cont = document.getElementById('ocrTexto');
+  const UMBRAL = 70;   // menos de 70% de confianza = dudoso
+  let html = '';
+  let symbols = [];
+
+  // Recorrer la estructura de Tesseract para juntar los símbolos (caracteres)
+  try{
+    (data.blocks||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>{
+      (l.words||[]).forEach(w=>{
+        (w.symbols||[]).forEach(s=> symbols.push(s));
+        symbols.push({text:' ', confidence:100});
+      });
+      symbols.push({text:'\n', confidence:100});
+    })));
+  }catch(e){}
+
+  if(symbols.length){
+    html = symbols.map(s=>{
+      const t = (s.text||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if(t==='\n') return '<br>';
+      if((s.confidence||100) < UMBRAL)
+        return `<span style="color:#c0392b;font-weight:700;background:#fcdede">${t}</span>`;
+      return t;
+    }).join('');
+    cont.innerHTML = '<div style="font-size:10px;color:var(--tinta-suave);margin-bottom:6px;font-weight:600">TEXTO LEÍDO (lo rojo es dudoso, revísalo):</div>' + html;
+    cont.style.display = 'block';
+  } else {
+    // Si no hay símbolos disponibles, mostrar el texto plano
+    cont.innerHTML = '<div style="font-size:10px;color:var(--tinta-suave);margin-bottom:6px;font-weight:600">TEXTO LEÍDO:</div>' +
+      (data.text||'').replace(/</g,'&lt;');
+    cont.style.display = 'block';
+  }
+}
+
 
 // Convierte la primera página de un PDF a un dataURL de imagen (para OCR)
 async function pdfPrimeraPaginaImg(file){
@@ -873,27 +920,56 @@ function marcarNoLeido(id){
 }
 
 function prellenarDesdeOCR(txt){
-  let m;
+  const original = txt || '';
+  // El OCR confunde ceros con la letra O. Para buscar números, normalizamos.
+  const T = original.replace(/[OoQ]/g, '0');
+
   // RUC (13 dígitos)
-  const ruc = txt.match(/\b(\d{13})\b/);
+  const ruc = T.match(/(\d{13})/);
   if(ruc) setCampo('mRuc', ruc[1]);
-  // No. documento: 002-001-000003968 (NO debe ser el mismo que el RUC)
-  m = txt.match(/\b(\d{3}-\d{3}-\d{6,9})\b/);
-  if(!m){
-    const m2 = txt.match(/(\d{3})[-\s]+(\d{3})[-\s]+(\d{4,9})/);
-    if(m2) m = [m2[1]+'-'+m2[2]+'-'+m2[3].padStart(9,'0')];
+
+  // No. documento: estab(3)-ptoemi(3)-secuencial. El OCR suele leer mal los ceros
+  // (O->0), pegar el establecimiento con el punto (002001) y confundir S/5, B/8.
+  let numero = null;
+  // limpiar confusiones comunes en zonas numéricas
+  let Tn = T.replace(/(\d)[Ss](\d)/g,'$15$2').replace(/(\d)[Bb](\d)/g,'$18$2');
+  let m = Tn.match(/(\d{3})\s*[-–]\s*(\d{3})\s*[-–]?\s*([\dSsBb ]{4,12})/);   // 002-001-000003967
+  if(!m) m = Tn.match(/(\d{3})(\d{3})\s*[-–]\s*([\dSsBb ]{4,12})/);            // 002001-000003967
+  if(m){
+    const sec = m[3].replace(/[Ss]/g,'5').replace(/[Bb]/g,'8').replace(/\D/g,'');
+    if(sec.length >= 3) numero = `${m[1]}-${m[2]}-${sec.padStart(9,'0')}`;
   }
-  if(m && (!ruc || m[0] !== ruc[1])) setCampo('mNumero', m[0].replace(/\s/g,''));
-  // Emisor: línea con palabra de negocio de comida
-  const lineas = (txt||'').split('\n').map(l=>l.trim()).filter(Boolean);
+  if(numero && (!ruc || numero.replace(/\D/g,'') !== ruc[1])) setCampo('mNumero', numero);
+
+  // Emisor: buscar el nombre del local. Primero por palabras típicas de comida,
+  // y si no, la primera línea "de nombre" (con letras, no la del RUC).
+  const lineas = original.split('\n').map(l=>l.trim()).filter(Boolean);
+  let emisor = null;
   for(const l of lineas){
-    if(/asadero|restaurant|chifa|pollo|parrilla|comida|cafeteria|marisqueria|picanteria|fritada|hornado|cevicheria|heladeria|panaderia|sanduche|burger|pizza/i.test(l)){
-      setCampo('mEmisor', l.replace(/["“”]/g,'').slice(0,60));
+    if(/asadero|restauran|chifa|pollo|parrilla|comida|aliment|cafeter|marisqu|picanter|fritada|hornado|cevicher|helader|panader|sanduch|burger|pizza|men[uú]|almuerzo|food|asader/i.test(l)){
+      emisor = l.replace(/["“”]/g,'').trim().slice(0,60);
       break;
     }
   }
-  // Fecha dd/mm/aaaa
-  const fe = txt.match(/\b(\d{2}\/\d{2}\/\d{4})\b/);
+  if(emisor) setCampo('mEmisor', emisor);
+  else {
+    // Si no detectó palabra de comida, usar la primera línea con nombre propio
+    // (suele ser el titular impreso, ej: "Rosa Matilde Huanga Merchán"),
+    // quitando la parte del RUC.
+    for(const l of lineas){
+      const limpio = l.replace(/RUC.*/i,'').replace(/[0-9]/g,'').trim();
+      if(limpio.length >= 6 && /[A-Za-zÁÉÍÓÚñ]{3,}\s+[A-Za-zÁÉÍÓÚñ]{3,}/.test(limpio)){
+        setCampo('mEmisor', limpio.slice(0,60));
+        break;
+      }
+    }
+  }
+
+  // Descripción: si el texto menciona algo de comida, sugerir MERIENDA; si dice agua, AGUA
+  if(/agua|botell/i.test(original)) document.getElementById('mComida').value = 'AGUA';
+
+  // Fecha dd/mm/aaaa (impresa). La manuscrita casi nunca se lee.
+  const fe = T.match(/(\d{2}\/\d{2}\/\d{4})/);
   if(fe) setCampo('mFecha', fe[1]);
 
   // Marcar en rojo lo que NO se pudo leer (para que lo completes)
