@@ -14,6 +14,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <!-- Chart.js: gráficos del dashboard -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- jsPDF + autoTable: generar el reporte en PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root{
     --tinta:#12241c; --tesoro:#1b6b4f; --tesoro-claro:#e7f2ec;
@@ -41,6 +44,16 @@
   .tab.activa{color:var(--tesoro);border-bottom-color:var(--tesoro)}
   .panel{background:#fff;border:1px solid var(--linea);border-radius:12px;padding:18px 20px;margin-bottom:22px}
   .panel-t{font-size:15px;margin-bottom:14px}
+  .cat-lista{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .cat-chip{display:inline-flex;align-items:center;gap:8px;background:var(--tesoro-claro);
+    border:1px solid var(--linea);border-radius:20px;padding:6px 12px;font-size:13px}
+  .cat-chip b{font-weight:600}
+  .cat-chip .x{cursor:pointer;color:var(--alerta);font-weight:700;font-size:15px;line-height:1;
+    border:none;background:none;padding:0 2px}
+  .cat-chip .x:hover{color:#8a1810}
+  .cat-add{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .cat-add input{font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--linea);
+    border-radius:7px;flex:1;min-width:140px}
 
   .config-bar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:22px;
     background:#fff;border:1px solid var(--linea);border-radius:10px;padding:12px 16px}
@@ -81,6 +94,8 @@
   .tabla-caja tbody td{padding:8px;border-bottom:1px solid var(--linea);vertical-align:middle}
   .tabla-caja tbody tr:last-child td{border-bottom:none}
   .tabla-caja tbody tr.exc{background:var(--alerta-bg)}
+  .tabla-caja tbody tr.duplicada{background:#ffd6d6 !important;box-shadow:inset 3px 0 0 #c0392b}
+  .tabla-caja tbody tr.duplicada td{color:#a01808}
   .tabla-caja tbody tr.exc td.montoexc{color:var(--alerta);font-weight:700}
   .tabla-caja .emisor{font-weight:600}
   .tabla-caja .meta{font-size:11.5px;color:var(--tinta-suave)}
@@ -132,7 +147,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 4.3</div>
+    <div style="font-size:12px;color:#7d867f">Versión 4.8</div>
   </div>
 </header>
 
@@ -141,6 +156,7 @@
   <div class="tabs">
     <button class="tab activa" id="tabFacturas" onclick="cambiarTab('facturas')">📋 Facturas</button>
     <button class="tab" id="tabDashboard" onclick="cambiarTab('dashboard')">📊 Dashboard</button>
+    <button class="tab" id="tabCatalogos" onclick="cambiarTab('catalogos')">⚙️ Catálogos</button>
   </div>
 
   <!-- ===== VISTA FACTURAS ===== -->
@@ -179,6 +195,7 @@
   <div id="contenedorTabla"></div>
 
   <div class="acciones" id="accionesExport" style="display:none">
+    <button class="btn btn-sec" onclick="autoClasificarComidas()" title="Si hay 2 comidas el mismo día: la 1a queda ALMUERZO y la 2a MERIENDA">🍽 Auto-clasificar comidas</button>
     <button class="btn btn-sec" onclick="limpiar()">Limpiar todo</button>
     <button class="btn btn-prim" onclick="exportar()">Exportar a Excel</button>
   </div>
@@ -210,6 +227,24 @@
       <div style="position:relative;height:220px"><canvas id="chartMes"></canvas></div>
     </div>
 
+    <!-- Importar meses pasados -->
+    <div class="panel">
+      <h2 class="panel-t">Cargar cajas chicas de meses pasados</h2>
+      <p style="font-size:12.5px;color:var(--tinta-suave);margin-bottom:12px">
+        Sube el Excel del reporte SD-FO-AF-03 de un mes anterior (ene, feb…) para
+        alimentar el dashboard con el histórico del año. Se guarda como una reposición archivada.
+      </p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="impEtiqueta" placeholder="Etiqueta (ej: Enero 2026)" autocomplete="off"
+               style="font-size:13px;padding:8px 10px;border:1px solid var(--linea);border-radius:7px;width:180px">
+        <input type="file" id="impFile" accept=".xlsx" style="display:none">
+        <button class="btn btn-sec" onclick="document.getElementById('impFile').click()">📁 Elegir Excel</button>
+        <span id="impNombre" style="font-size:12px;color:var(--tinta-suave)"></span>
+        <button class="btn btn-prim" onclick="importarMes()">Importar</button>
+      </div>
+      <div id="impEstado" style="font-size:12.5px;margin-top:10px"></div>
+    </div>
+
     <!-- Historial de reposiciones -->
     <div class="panel">
       <h2 class="panel-t">Historial de reposiciones</h2>
@@ -217,6 +252,41 @@
     </div>
 
   </div><!-- fin vistaDashboard -->
+
+  <!-- ===== VISTA CATÁLOGOS ===== -->
+  <div id="vistaCatalogos" style="display:none">
+    <div class="panel">
+      <h2 class="panel-t">Descripciones recurrentes</h2>
+      <p style="font-size:12.5px;color:var(--tinta-suave);margin-bottom:12px">
+        Las opciones que aparecen al clasificar (agua, almuerzo, merienda…).
+      </p>
+      <div id="catDesc" class="cat-lista"></div>
+      <div class="cat-add">
+        <input id="nuevaDesc" placeholder="Nueva descripción (ej: CAFÉ)" autocomplete="off">
+        <button class="btn btn-prim" onclick="agregarCat('desc')">Agregar</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel-t">Códigos de proyecto</h2>
+      <div id="catProy" class="cat-lista"></div>
+      <div class="cat-add">
+        <input id="nuevoProyCod" placeholder="Código (ej: OP000)" autocomplete="off" style="width:130px">
+        <input id="nuevoProyNom" placeholder="Nombre (ej: Operaciones)" autocomplete="off">
+        <button class="btn btn-prim" onclick="agregarCat('proy')">Agregar</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel-t">Centros de costo (CC)</h2>
+      <div id="catCC" class="cat-lista"></div>
+      <div class="cat-add">
+        <input id="nuevoCCCod" placeholder="Código (ej: ISLA)" autocomplete="off" style="width:130px">
+        <input id="nuevoCCNom" placeholder="Nombre (opcional)" autocomplete="off">
+        <button class="btn btn-prim" onclick="agregarCat('cc')">Agregar</button>
+      </div>
+    </div>
+  </div><!-- fin vistaCatalogos -->
 </div>
 
 <!-- Modal de captura manual / escaneada -->
@@ -296,6 +366,7 @@ const FORMAS_PAGO = {
 let facturas = [];
 let CATALOGO_PROYECTOS = [{codigo:'ADM000',nombre:'Administración'}];
 let CATALOGO_CC = [{codigo:'ISLA',nombre:'Isla'}];
+let CATALOGO_DESC = ['MERIENDA','ALMUERZO','DESAYUNO','AGUA'];
 let repActual = { fondo: 250, limite_comida: 5 };
 
 // Carga inicial desde el servidor
@@ -305,6 +376,10 @@ async function cargarTodo(){
     if(cat.proyectos && cat.proyectos.length) CATALOGO_PROYECTOS = cat.proyectos;
     if(cat.centros_costo && cat.centros_costo.length) CATALOGO_CC = cat.centros_costo;
   }catch(e){ console.warn('catalogos:', e); }
+  try{
+    const d = await (await fetch('/api/descripciones')).json();
+    if(d.descripciones && d.descripciones.length) CATALOGO_DESC = d.descripciones;
+  }catch(e){}
   try{
     const r = await (await fetch('/api/reposicion-actual')).json();
     repActual = r.reposicion;
@@ -420,14 +495,12 @@ function extraer(txt){
     'BURGER','GRILL','MOKA','FILET','BROCOLI','BRÓCOLI','MI PARA MI'];
   d.tieneComida = ES_COMIDA.some(p => T.includes(p));
 
-  // Clasificación MERIENDA/ALMUERZO/DESAYUNO por hora (editable)
-  const h = d.hora ? parseInt(d.hora.split(':')[0], 10) : null;
+  // Clasificación: agua es AGUA; comida es MERIENDA por defecto (la regla de
+  // "2 el mismo día → ALMUERZO + MERIENDA" se aplica luego con clasificarComidaDia).
   if(T.includes('AGUA')){
-    d.comida = 'AGUA';               // caso especial: agua embotellada
+    d.comida = 'AGUA';
   } else if(d.tieneComida){
-    if(h !== null && h >= 5 && h < 11) d.comida = 'DESAYUNO';
-    else if(h !== null && h >= 11 && h < 16) d.comida = 'ALMUERZO';
-    else d.comida = 'MERIENDA';
+    d.comida = 'MERIENDA';
   } else {
     d.comida = 'REVISAR CONCEPTO';  // no se detectó comida -> el usuario decide
   }
@@ -445,7 +518,7 @@ document.getElementById('file').addEventListener('change', ev=>procesar(ev.targe
 
 async function procesar(files){
   const pdfs = [...files].filter(f=>f.name.toLowerCase().endsWith('.pdf'));
-  if(!pdfs.length){ alert('Solo se aceptan archivos PDF.'); return; }
+  if(!pdfs.length){ await avisar('Solo se aceptan archivos PDF.', 'Archivo no válido', 'alerta', '📄'); return; }
   const carg = document.getElementById('cargando');
   carg.style.display = 'block';
   let errores = [];
@@ -477,13 +550,13 @@ async function procesar(files){
       })).json();
       // recargar desde la base para tener los IDs reales
       await recargarFacturas();
-    }catch(e){ alert('Error guardando en la base de datos: '+e.message); }
+    }catch(e){ await avisar('Error guardando en la base de datos: '+e.message, 'Error', 'error', '⚠️'); }
   }
   carg.style.display = 'none';
   document.getElementById('file').value = '';
   render();
-  if(errores.length) alert('No se pudieron leer:\n' + errores.join('\n') +
-    '\n\n¿Son facturas electrónicas del SRI en PDF?');
+  if(errores.length) await avisar('No se pudieron leer:\n' + errores.join('\n') +
+    '\n\n¿Son facturas electrónicas del SRI en PDF?', 'Algunos PDF fallaron', 'alerta', '📄');
 }
 
 // dd/mm/yyyy -> yyyy-mm-dd (para la base)
@@ -512,6 +585,39 @@ function calcExcedente(f){
   const esComida = f.comida && f.comida !== 'REVISAR CONCEPTO' && f.comida !== 'AGUA';
   if(!esComida) return 0;
   return Math.max(0, +((Number(f.total)||0) - limite).toFixed(2));
+}
+
+// Regla: por cada día, si hay 2+ comidas (no agua), la 1ª = ALMUERZO, la 2ª = MERIENDA.
+// (las demás quedan MERIENDA). Solo toca facturas de comida, respeta AGUA y otras.
+async function autoClasificarComidas(){
+  const ok = await confirmar(
+    'Se reclasificarán las comidas por día:\n\n• 1ª comida del día = ALMUERZO\n• 2ª (y siguientes) = MERIENDA',
+    'Auto-clasificar comidas', '🍽');
+  if(!ok) return;
+  // agrupar por fecha
+  const porDia = {};
+  facturas.forEach((f,i)=>{
+    if(f.comida==='ALMUERZO' || f.comida==='MERIENDA' || f.comida==='DESAYUNO'){
+      const dia = f.fecha || '';
+      (porDia[dia] = porDia[dia] || []).push(i);
+    }
+  });
+  const cambios = [];
+  Object.values(porDia).forEach(indices=>{
+    // ordenar por id para saber cuál entró primero
+    indices.sort((a,b)=>(facturas[a].id||0)-(facturas[b].id||0));
+    indices.forEach((idx,pos)=>{
+      const nueva = pos === 0 ? 'ALMUERZO' : 'MERIENDA';
+      if(facturas[idx].comida !== nueva){
+        facturas[idx].comida = nueva;
+        facturas[idx].excedente = calcExcedente(facturas[idx]);
+        cambios.push(facturas[idx]);
+      }
+    });
+  });
+  for(const f of cambios) await guardarFacturaDB(f);
+  render();
+  await avisar(`Se reclasificaron ${cambios.length} factura(s).`, 'Listo', 'exito', '✓');
 }
 
 async function recalcular(){
@@ -578,7 +684,14 @@ function render(){
   }
   document.getElementById('accionesExport').style.display = 'flex';
 
-  const OPCIONES = ['MERIENDA','ALMUERZO','DESAYUNO','AGUA','REVISAR CONCEPTO'];
+  const OPCIONES = CATALOGO_DESC.includes('REVISAR CONCEPTO') ? CATALOGO_DESC : [...CATALOGO_DESC, 'REVISAR CONCEPTO'];
+
+  // Detectar números de documento repetidos (para marcarlos en rojo fuerte)
+  const conteoNum = {};
+  facturas.forEach(f=>{
+    const n = (f.numero||'').trim();
+    if(n) conteoNum[n] = (conteoNum[n]||0) + 1;
+  });
 
   // Genera las <option> de un selector, incluye el valor actual aunque no esté
   // en la lista (valor personalizado escrito con OTROS), y agrega OTROS al final.
@@ -594,15 +707,17 @@ function render(){
     const d = derivar(f);
     const exc = d.excedente;
     const revisar = f.comida === 'REVISAR CONCEPTO';
+    const dup = (f.numero||'').trim() && conteoNum[(f.numero||'').trim()] > 1;
     const ops = opciones(OPCIONES, f.comida);
     const ccVal = f.cc || 'ISLA';
     const proyVal = f.codigo_proyecto || 'ADM000';
     const opsCC = opciones(CATALOGO_CC.map(c=>c.codigo), ccVal);
     const opsProy = opciones(CATALOGO_PROYECTOS.map(p=>p.codigo), proyVal);
-    return `<tr class="${exc>0?'exc':''}">
-      <td class="meta">${f.fecha||'—'}</td>
+    return `<tr class="${exc>0?'exc':''} ${dup?'duplicada':''}">
+      <td class="meta">${f.fecha||'—'}${dup?' <span title="Número de documento repetido" style="color:#c0392b;font-weight:700">⚠</span>':''}</td>
       <td>
         <input class="edit emisor" value="${(f.emisor||'').replace(/"/g,'&quot;')}"
+               title="${(f.emisor||'').replace(/"/g,'&quot;')}"
                onchange="editar(${idx},'emisor',this.value)">
       </td>
       <td>
@@ -670,13 +785,13 @@ function editarTotal(i, val){
   render();
 }
 async function eliminar(i){
-  if(!confirm('¿Eliminar este comprobante?')) return;
+  if(!(await confirmar('¿Eliminar este comprobante?', 'Eliminar', '🗑'))) return;
   const f = facturas[i];
   try{ await fetch('/api/facturas/'+f.id, {method:'DELETE'}); }catch(e){}
   facturas.splice(i,1); render();
 }
 async function limpiar(){
-  if(!confirm('¿Borrar todos los comprobantes de esta reposición?')) return;
+  if(!(await confirmar('¿Borrar todos los comprobantes de esta reposición?', 'Limpiar todo', '🗑'))) return;
   for(const f of facturas){
     try{ await fetch('/api/facturas/'+f.id, {method:'DELETE'}); }catch(e){}
   }
@@ -701,7 +816,42 @@ function b64ToBuffer(b64){
   return bytes.buffer;
 }
 
+// Pregunta el formato y llama al que corresponda
 async function exportar(){
+  if(!facturas.length) return;
+
+  // BLOQUEO: no exportar si hay números de documento repetidos
+  const conteo = {};
+  facturas.forEach(f=>{ const n=(f.numero||'').trim(); if(n) conteo[n]=(conteo[n]||0)+1; });
+  const repetidos = Object.keys(conteo).filter(n=>conteo[n]>1);
+  if(repetidos.length){
+    await dialogo({
+      titulo: 'No se puede exportar',
+      icono: '⚠️', tipo: 'alerta',
+      mensaje: `Hay ${repetidos.length} número(s) de documento repetido(s):\n\n` +
+               repetidos.slice(0,6).join('\n') +
+               (repetidos.length>6 ? `\n… y ${repetidos.length-6} más` : '') +
+               `\n\nRevisa las facturas en rojo y corrige o elimina las repetidas antes de exportar.`,
+      botones:[{txt:'Ver facturas', val:true, prim:true}]
+    });
+    return;
+  }
+
+  // Elegir formato
+  const formato = await dialogo({
+    titulo: '¿Cómo deseas descargar?',
+    icono: '📥', tipo: 'info',
+    mensaje: 'Elige el formato del reporte de reposición.',
+    botones:[
+      {txt:'Excel', val:'excel', prim:false},
+      {txt:'PDF', val:'pdf', prim:true}
+    ]
+  });
+  if(formato === 'excel') await exportarExcel();
+  else if(formato === 'pdf') await exportarPDF();
+}
+
+async function exportarExcel(){
   if(!facturas.length) return;
   const fondo = parseFloat(document.getElementById('cfgFondo').value) || 0;
   const hoy = new Date();
@@ -799,20 +949,99 @@ async function exportar(){
   a.click();
   URL.revokeObjectURL(url);
 
-  // Preguntar qué hacer con la tabla tras exportar
-  if(confirm('Excel descargado.\n\n¿Archivar esta reposición y LIMPIAR la tabla para empezar una nueva?\n\n• Aceptar: guarda todo en el historial y limpia la tabla.\n• Cancelar: deja las facturas como están.')){
+  await trasExportar('Excel descargado');
+}
+
+// Pregunta si archivar/limpiar tras exportar (compartido por Excel y PDF)
+async function trasExportar(titulo){
+  const archivar = await dialogo({
+    titulo: titulo,
+    icono: '📥',
+    tipo: 'exito',
+    mensaje: '¿Qué deseas hacer con la lista actual?\n\n• Archivar y limpiar: guarda todo en el historial y empieza una reposición nueva.\n• Dejar como está: conserva las facturas en la tabla.',
+    botones:[
+      {txt:'Dejar como está', val:false, prim:false},
+      {txt:'Archivar y limpiar', val:true, prim:true}
+    ]
+  });
+  if(archivar){
     try{
       await fetch('/api/reposicion-actual/cerrar', {method:'POST'});
-      await recargarFacturas();   // ahora crea/lee una reposición nueva vacía
+      await recargarFacturas();
       render();
       cargarDashboard();
-    }catch(e){ alert('No se pudo archivar: '+e.message); }
+    }catch(e){ await avisar('No se pudo archivar: '+e.message, 'Error', 'error', '⚠️'); }
   }
 }
 
-// ============================================================
-//  Captura manual / escaneada (con OCR opcional)
-// ============================================================
+// Genera el reporte en PDF con jsPDF + autoTable
+async function exportarPDF(){
+  if(!facturas.length) return;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+  const fondo = parseFloat(document.getElementById('cfgFondo').value) || 0;
+  const hoy = new Date();
+  const responsable = (repActual && repActual.responsable) || 'Abrahan Gallegos';
+
+  // Encabezado
+  doc.setFontSize(14); doc.setFont(undefined,'bold');
+  doc.text('REPORTE REPOSICIÓN DE CAJA CHICA', 148, 15, {align:'center'});
+  doc.setFontSize(9); doc.setFont(undefined,'normal');
+  doc.text('Security Data — SD-FO-AF-03', 148, 20, {align:'center'});
+  doc.text(`Fecha: ${formatFecha(hoy.toISOString().slice(0,10))}`, 14, 28);
+  doc.text(`Encargado: ${responsable}`, 14, 33);
+  doc.text(`Fondo caja chica: $${fondo.toFixed(2)}`, 240, 28);
+
+  // Ordenar por fecha
+  const orden = [...facturas].sort((a,b)=>{
+    const fa=fechaOrden(a.fecha), fb=fechaOrden(b.fecha); return fa-fb;
+  });
+
+  // Filas de la tabla
+  let tGastos=0, tExc=0, tIva=0, tSub0=0, tSub15=0;
+  const filas = orden.map(f=>{
+    const total=Number(f.total)||0, iva=Number(f.iva)||0, exc=Number(f.excedente)||0;
+    const es0 = iva===0; const sub = +(total-iva).toFixed(2);
+    tGastos+=total; tExc+=exc; tIva+=iva; if(es0) tSub0+=total; else tSub15+=sub;
+    return [
+      f.fecha||'', f.emisor||'', f.comida||'', f.numero||'', f.cc||'', f.codigo_proyecto||'',
+      es0?total.toFixed(2):'', es0?'':sub.toFixed(2), iva.toFixed(2),
+      total.toFixed(2), exc>0?exc.toFixed(2):''
+    ];
+  });
+
+  doc.autoTable({
+    startY: 38,
+    head: [['FECHA','PROVEEDOR','DESCRIPCIÓN','No. DOCUMENTO','CC','CÓD. PROY.','SUB 0%','SUB 15%','IVA','VALOR','EXCED.']],
+    body: filas,
+    foot: [['','','','','','TOTALES:', tSub0.toFixed(2), tSub15.toFixed(2), tIva.toFixed(2), tGastos.toFixed(2), tExc.toFixed(2)]],
+    styles:{ fontSize:7, cellPadding:1.5 },
+    headStyles:{ fillColor:[27,107,79], textColor:255, fontSize:7 },
+    footStyles:{ fillColor:[231,242,236], textColor:[18,36,28], fontStyle:'bold' },
+    alternateRowStyles:{ fillColor:[246,244,238] },
+    columnStyles:{
+      6:{halign:'right'},7:{halign:'right'},8:{halign:'right'},9:{halign:'right'},10:{halign:'right'}
+    }
+  });
+
+  // Resumen de saldos
+  let y = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(9);
+  const saldoReq = tGastos;
+  doc.text(`Saldo caja: $${fondo.toFixed(2)}`, 200, y);
+  doc.text(`Saldo requerido (gastos): $${saldoReq.toFixed(2)}`, 200, y+5);
+  doc.text(`Valor excedente: $${tExc.toFixed(2)}`, 200, y+10);
+  doc.text(`Valor de reposición: $${(fondo-tExc).toFixed(2)}`, 200, y+15);
+
+  // Firma
+  doc.text(`_____________________`, 30, y+18);
+  doc.text(`${responsable}`, 30, y+23);
+  doc.text('ELABORADO POR', 30, y+28);
+
+  doc.save(`SD-FO-AF-03_Reposicion_CajaChica_${hoy.toISOString().slice(0,10).replace(/-/g,'')}.pdf`);
+
+  await trasExportar('PDF descargado');
+}
 function abrirManual(){
   // Llenar selectores de CC y proyecto desde el catálogo, con OTROS al final
   document.getElementById('mCC').innerHTML =
@@ -1040,9 +1269,8 @@ async function guardarManual(){
   chequear('mTotal', total > 0);
 
   if(faltantes.length){
-    alert('Faltan datos obligatorios (marcados en rojo):\n' +
-      '· La fecha debe ser día/mes/año (ej: 11/8/2026)\n' +
-      '· Emisor, RUC, No. Documento y Total no pueden estar vacíos.');
+    await avisar('Faltan datos obligatorios (marcados en rojo):\n\n• La fecha debe ser día/mes/año (ej: 11/8/2026)\n• Emisor, RUC, No. Documento y Total no pueden estar vacíos.',
+      'Completa los datos', 'alerta', '✏️');
     document.getElementById(faltantes[0]).focus();
     return;
   }
@@ -1080,7 +1308,7 @@ async function guardarManual(){
     await recargarFacturas();
     cerrarManual();
     render();
-  }catch(e){ alert('Error guardando: '+e.message); }
+  }catch(e){ await avisar('Error guardando: '+e.message, 'Error', 'error', '⚠️'); }
 }
 
 // ============================================================
@@ -1092,12 +1320,14 @@ const COLORES_DASH = ['#1b6b4f','#c9a24b','#3d7ea6','#b5341f','#7d5ba6','#d68438
                       '#5c8a3a','#2b6b7a','#a63d6a','#6b6b6b'];
 
 function cambiarTab(tab){
-  const esFact = tab === 'facturas';
-  document.getElementById('vistaFacturas').style.display = esFact ? 'block' : 'none';
-  document.getElementById('vistaDashboard').style.display = esFact ? 'none' : 'block';
-  document.getElementById('tabFacturas').classList.toggle('activa', esFact);
-  document.getElementById('tabDashboard').classList.toggle('activa', !esFact);
-  if(!esFact) cargarDashboard();   // refrescar datos al entrar
+  document.getElementById('vistaFacturas').style.display = tab==='facturas' ? 'block' : 'none';
+  document.getElementById('vistaDashboard').style.display = tab==='dashboard' ? 'block' : 'none';
+  document.getElementById('vistaCatalogos').style.display = tab==='catalogos' ? 'block' : 'none';
+  document.getElementById('tabFacturas').classList.toggle('activa', tab==='facturas');
+  document.getElementById('tabDashboard').classList.toggle('activa', tab==='dashboard');
+  document.getElementById('tabCatalogos').classList.toggle('activa', tab==='catalogos');
+  if(tab==='dashboard') cargarDashboard();
+  if(tab==='catalogos') cargarCatalogos();
 }
 
 async function cargarDashboard(){
@@ -1221,7 +1451,247 @@ async function cargarHistorial(){
   }catch(e){ console.warn('historial:', e); }
 }
 
+// ============================================================
+//  Importar caja chica de meses pasados (Excel SD-FO-AF-03)
+// ============================================================
+let impFacturas = null;
+
+document.getElementById('impFile').addEventListener('change', async (ev)=>{
+  const file = ev.target.files[0];
+  if(!file) return;
+  document.getElementById('impNombre').textContent = file.name;
+  const est = document.getElementById('impEstado');
+  est.innerHTML = 'Leyendo Excel…';
+  try{
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+    const ws = wb.getWorksheet('ESTRUCTURA') || wb.worksheets[0];
+
+    // Detectar la fila de cabecera: debe tener FECHA en col B y PROVEEDOR en col C
+    let headerRow = null;
+    for(let r=1;r<=20;r++){
+      const b = ws.getCell(r,2).value, c = ws.getCell(r,3).value;
+      if(b && c && String(b).toUpperCase().trim()==='FECHA' &&
+         String(c).toUpperCase().includes('PROVEEDOR')){ headerRow = r; break; }
+    }
+    if(!headerRow){ est.innerHTML = '<span style="color:#c0392b">No parece un reporte SD-FO-AF-03 (no encontré la cabecera).</span>'; return; }
+
+    // Mapear nombres de columna -> índice
+    const col = {};
+    for(let c=2;c<=20;c++){
+      const h = ws.getCell(headerRow,c).value;
+      if(h) col[String(h).toUpperCase().trim()] = c;
+    }
+    const cFecha = col['FECHA'], cProv = col['PROVEEDOR'], cDesc = col['DESCRIPCIÓN']||col['DESCRIPCION'],
+          cNum = col['NO. DOCUMENTO']||col['NO DOCUMENTO'], cCC = col['CC'],
+          cProy = col['CODIGO PROYECTO']||col['CÓDIGO PROYECTO'],
+          cSub0 = col['SUB 0%'], cSub15 = col['SUB 15%'], cDesc2 = col['DESCUENTO'],
+          cIva = col['IVA'], cValor = col['VALOR'], cExc = col['EXCEDENTE'];
+
+    // Leer facturas desde headerRow+3 (deja la fila TOTAL CAJA CHICA)
+    const facturas = [];
+    for(let r=headerRow+1; r<=ws.rowCount; r++){
+      const prov = ws.getCell(r, cProv).value;
+      const fecha = cFecha ? ws.getCell(r, cFecha).value : null;
+      if(!prov || String(prov).toUpperCase().includes('TOTAL CAJA')) continue;
+      if(!fecha) continue;   // saltar filas sin fecha (totales, vacías)
+      const val = v => { const x = ws.getCell(r, v).value; return (x && x.result!==undefined)? x.result : x; };
+      let fISO = null;
+      const fv = ws.getCell(r, cFecha).value;
+      if(fv instanceof Date) fISO = fv.toISOString().slice(0,10);
+      else if(fv){ const p=String(fv).split(/[\/\-]/); if(p.length===3) fISO = `${p[2].length===2?'20'+p[2]:p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; }
+
+      // El código de proyecto puede venir en su columna, o dentro del texto del proveedor (formato viejo)
+      let proy = cProy ? (val(cProy)||'') : '';
+      let provTxt = String(prov);
+      if(!proy){
+        const m = provTxt.match(/\b(ADM\d+|OP\d+|SO\d+|[A-Z]{2,}\d{3})\b/);
+        if(m) proy = m[1];
+      }
+      facturas.push({
+        fecha: fISO, emisor: provTxt.slice(0,120),
+        numero: cNum? String(val(cNum)||'') : '',
+        descripcion: cDesc? String(val(cDesc)||'MERIENDA') : 'MERIENDA',
+        cc: cCC? String(val(cCC)||'ISLA') : 'ISLA',
+        codigo_proyecto: proy || 'ADM000',
+        sub0: +(val(cSub0)||0), sub15: +(val(cSub15)||0),
+        descuento: +(val(cDesc2)||0), iva: +(val(cIva)||0),
+        total: +(val(cValor)||0), excedente: +(val(cExc)||0)
+      });
+    }
+    impFacturas = facturas;
+    est.innerHTML = `<span style="color:#1b6b4f">✓ Leídas ${facturas.length} facturas. Pon una etiqueta y pulsa Importar.</span>`;
+  }catch(e){
+    est.innerHTML = '<span style="color:#c0392b">Error leyendo el Excel: '+e.message+'</span>';
+  }
+});
+
+async function importarMes(forzar){
+  if(!impFacturas || !impFacturas.length){ await avisar('Primero elige un Excel válido.', 'Falta el archivo', 'alerta', '📁'); return; }
+  const etiqueta = document.getElementById('impEtiqueta').value.trim() || 'Histórico';
+  let fechaCierre = impFacturas.map(f=>f.fecha).filter(Boolean).sort().pop() || null;
+  const est = document.getElementById('impEstado');
+  est.innerHTML = 'Importando…';
+  try{
+    const r = await (await fetch('/api/importar-historico', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ etiqueta, fecha_cierre: fechaCierre, fondo: 250, facturas: impFacturas, forzar: !!forzar })
+    })).json();
+
+    // La base detectó facturas que ya existen (posible duplicado)
+    if(r.duplicado){
+      const seguir = await dialogo({
+        titulo: 'Facturas ya existentes',
+        icono: '⚠️',
+        tipo: 'alerta',
+        mensaje: `${r.mensaje}\n\nEjemplos: ${(r.ejemplos||[]).join(', ')}\n\n` +
+                 `Esto suele pasar si ya importaste este mes antes.\n\n¿Importar de todos modos? Se crearán registros duplicados.`,
+        botones:[
+          {txt:'No importar', val:false, prim:false},
+          {txt:'Importar igual', val:true, prim:true}
+        ]
+      });
+      if(seguir){ return importarMes(true); }
+      est.innerHTML = '<span style="color:#c0392b">Importación cancelada (ya existían esas facturas).</span>';
+      return;
+    }
+
+    if(r.ok){
+      est.innerHTML = `<span style="color:#1b6b4f">✓ Importado: ${r.n} facturas como "${etiqueta}".</span>`;
+      impFacturas = null;
+      document.getElementById('impFile').value = '';
+      document.getElementById('impNombre').textContent = '';
+      document.getElementById('impEtiqueta').value = '';
+      cargarDashboard();
+    } else {
+      est.innerHTML = '<span style="color:#c0392b">Error: '+(r.error||'no se pudo')+'</span>';
+    }
+  }catch(e){ est.innerHTML = '<span style="color:#c0392b">Error: '+e.message+'</span>'; }
+}
+
+// ============================================================
+//  Administrar catálogos (descripciones, proyectos, CC)
+// ============================================================
+async function cargarCatalogos(){
+  // Refrescar desde la base
+  try{
+    const cat = await (await fetch('/api/catalogos')).json();
+    if(cat.proyectos) CATALOGO_PROYECTOS = cat.proyectos;
+    if(cat.centros_costo) CATALOGO_CC = cat.centros_costo;
+  }catch(e){}
+  try{
+    const d = await (await fetch('/api/descripciones')).json();
+    if(d.descripciones && d.descripciones.length) CATALOGO_DESC = d.descripciones;
+  }catch(e){}
+
+  // Pintar descripciones
+  document.getElementById('catDesc').innerHTML = CATALOGO_DESC.map(t=>
+    `<span class="cat-chip"><b>${t}</b>
+     <button class="x" onclick="quitarCat('desc','${t.replace(/'/g,"\\'")}')" title="Quitar">×</button></span>`
+  ).join('') || '<span style="color:var(--tinta-suave);font-size:13px">Sin descripciones</span>';
+
+  // Pintar proyectos
+  document.getElementById('catProy').innerHTML = CATALOGO_PROYECTOS.map(p=>
+    `<span class="cat-chip"><b>${p.codigo}</b> <span style="color:var(--tinta-suave);font-size:12px">${p.nombre||''}</span>
+     <button class="x" onclick="quitarCat('proy','${p.codigo}')" title="Quitar">×</button></span>`
+  ).join('') || '<span style="color:var(--tinta-suave);font-size:13px">Sin códigos</span>';
+
+  // Pintar CC
+  document.getElementById('catCC').innerHTML = CATALOGO_CC.map(c=>
+    `<span class="cat-chip"><b>${c.codigo}</b> <span style="color:var(--tinta-suave);font-size:12px">${c.nombre||''}</span>
+     <button class="x" onclick="quitarCat('cc','${c.codigo}')" title="Quitar">×</button></span>`
+  ).join('') || '<span style="color:var(--tinta-suave);font-size:13px">Sin centros de costo</span>';
+}
+
+async function agregarCat(tipo){
+  try{
+    if(tipo==='desc'){
+      const t = document.getElementById('nuevaDesc').value.trim();
+      if(!t){ await avisar('Escribe una descripción.', 'Falta texto', 'alerta', '✏️'); return; }
+      await fetch('/api/descripciones', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({texto:t})});
+      document.getElementById('nuevaDesc').value='';
+    } else if(tipo==='proy'){
+      const cod = document.getElementById('nuevoProyCod').value.trim();
+      const nom = document.getElementById('nuevoProyNom').value.trim();
+      if(!cod || !nom){ await avisar('El código de proyecto necesita código y nombre.', 'Faltan datos', 'alerta', '✏️'); return; }
+      await fetch('/api/codigos-proyecto', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:cod, nombre:nom})});
+      document.getElementById('nuevoProyCod').value=''; document.getElementById('nuevoProyNom').value='';
+    } else if(tipo==='cc'){
+      const cod = document.getElementById('nuevoCCCod').value.trim();
+      const nom = document.getElementById('nuevoCCNom').value.trim();
+      if(!cod){ await avisar('El CC necesita al menos un código.', 'Falta código', 'alerta', '✏️'); return; }
+      await fetch('/api/centros-costo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:cod, nombre:nom})});
+      document.getElementById('nuevoCCCod').value=''; document.getElementById('nuevoCCNom').value='';
+    }
+    await cargarCatalogos();
+  }catch(e){ await avisar('Error: '+e.message, 'Error', 'error', '⚠️'); }
+}
+
+async function quitarCat(tipo, valor){
+  const ok = await confirmar(`¿Quitar "${valor}" del catálogo?\n\n(No afecta las facturas ya registradas con ese valor.)`, 'Quitar', '🗑');
+  if(!ok) return;
+  try{
+    const url = tipo==='desc' ? '/api/descripciones/'+encodeURIComponent(valor)
+              : tipo==='proy' ? '/api/codigos-proyecto/'+encodeURIComponent(valor)
+              : '/api/centros-costo/'+encodeURIComponent(valor);
+    await fetch(url, {method:'DELETE'});
+    await cargarCatalogos();
+  }catch(e){ await avisar('Error: '+e.message, 'Error', 'error', '⚠️'); }
+}
+
 cargarTodo();
+</script>
+
+<!-- Diálogo estético reutilizable (reemplaza alert/confirm feos) -->
+<div id="dlg" style="display:none;position:fixed;inset:0;background:rgba(18,36,28,.55);z-index:200;
+     align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:26px 26px 22px;
+       box-shadow:0 20px 60px rgba(0,0,0,.25)">
+    <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:8px">
+      <div id="dlgIcono" style="font-size:26px;line-height:1">💬</div>
+      <div style="flex:1">
+        <h3 id="dlgTitulo" style="font-size:16px;margin-bottom:6px;color:var(--tinta)">Título</h3>
+        <div id="dlgMensaje" style="font-size:13.5px;color:var(--tinta-suave);line-height:1.55;white-space:pre-line"></div>
+      </div>
+    </div>
+    <div id="dlgBotones" style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px"></div>
+  </div>
+</div>
+
+<script>
+// Diálogo estético que devuelve una promesa (reemplaza alert/confirm)
+function dialogo(opts){
+  return new Promise(resolve=>{
+    const { titulo='Aviso', mensaje='', icono='💬', tipo='info',
+            botones=[{txt:'Aceptar', val:true, prim:true}] } = opts;
+    document.getElementById('dlgTitulo').textContent = titulo;
+    document.getElementById('dlgMensaje').textContent = mensaje;
+    document.getElementById('dlgIcono').textContent = icono;
+    // color del título según tipo
+    const col = tipo==='error'?'#c0392b':tipo==='exito'?'#1b6b4f':tipo==='alerta'?'#c0392b':'var(--tinta)';
+    document.getElementById('dlgTitulo').style.color = col;
+    const cont = document.getElementById('dlgBotones');
+    cont.innerHTML = '';
+    botones.forEach(b=>{
+      const btn = document.createElement('button');
+      btn.className = 'btn ' + (b.prim ? 'btn-prim' : 'btn-sec');
+      btn.textContent = b.txt;
+      btn.onclick = ()=>{ document.getElementById('dlg').style.display='none'; resolve(b.val); };
+      cont.appendChild(btn);
+    });
+    document.getElementById('dlg').style.display = 'flex';
+  });
+}
+// Atajos
+function avisar(mensaje, titulo='Aviso', tipo='info', icono='💬'){
+  return dialogo({titulo, mensaje, tipo, icono, botones:[{txt:'Entendido', val:true, prim:true}]});
+}
+function confirmar(mensaje, titulo='Confirmar', icono='❓'){
+  return dialogo({titulo, mensaje, icono, botones:[
+    {txt:'Cancelar', val:false, prim:false},
+    {txt:'Sí, continuar', val:true, prim:true}
+  ]});
+}
 </script>
 </body>
 </html>
