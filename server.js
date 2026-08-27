@@ -51,6 +51,44 @@ app.post('/api/centros-costo', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Quitar (desactivar) un código de proyecto o CC — no se borra para no afectar históricos
+app.delete('/api/codigos-proyecto/:codigo', async (req, res) => {
+  try {
+    await pool.query(`UPDATE codigos_proyecto SET activo=FALSE WHERE codigo=$1`, [req.params.codigo]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/centros-costo/:codigo', async (req, res) => {
+  try {
+    await pool.query(`UPDATE centros_costo SET activo=FALSE WHERE codigo=$1`, [req.params.codigo]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Descripciones recurrentes
+app.get('/api/descripciones', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT texto FROM descripciones WHERE activo ORDER BY texto`);
+    res.json({ descripciones: r.rows.map(x => x.texto) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/descripciones', async (req, res) => {
+  const { texto } = req.body;
+  if (!texto) return res.status(400).json({ error: 'texto requerido' });
+  try {
+    await pool.query(
+      `INSERT INTO descripciones (texto) VALUES ($1)
+       ON CONFLICT (texto) DO UPDATE SET activo=TRUE`, [texto.toUpperCase().trim()]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/descripciones/:texto', async (req, res) => {
+  try {
+    await pool.query(`UPDATE descripciones SET activo=FALSE WHERE texto=$1`, [req.params.texto]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------- Reposición actual (abierta) ----------
 async function getOrCreateAbierta() {
   let r = await pool.query(`SELECT * FROM reposiciones WHERE estado='abierta' ORDER BY id DESC LIMIT 1`);
@@ -184,6 +222,48 @@ app.post('/api/reposicion-actual/cerrar', async (req, res) => {
     await pool.query(
       `UPDATE reposiciones SET estado='cerrada', cerrado_en=NOW() WHERE id=$1`, [rep.id]);
     res.json({ ok: true, cerrada: rep.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Importar una reposición histórica (mes pasado) ya cerrada, con sus facturas.
+app.post('/api/importar-historico', async (req, res) => {
+  const { etiqueta, fecha_cierre, fondo, facturas, forzar } = req.body;
+  if (!Array.isArray(facturas) || !facturas.length)
+    return res.status(400).json({ error: 'Sin facturas para importar' });
+  try {
+    // Detectar cuántos números de documento ya existen en la base (posible duplicado)
+    const numeros = facturas.map(f => (f.numero||'').trim()).filter(Boolean);
+    let repetidos = [];
+    if (numeros.length) {
+      const q = await pool.query(
+        `SELECT numero FROM facturas WHERE numero = ANY($1)`, [numeros]);
+      repetidos = q.rows.map(r => r.numero);
+    }
+    // Si hay repetidos y no se forzó, avisar sin importar
+    if (repetidos.length && !forzar) {
+      return res.json({
+        ok: false, duplicado: true, repetidos: repetidos.length,
+        ejemplos: repetidos.slice(0, 5),
+        mensaje: `${repetidos.length} factura(s) ya existen en la base (mismo No. de documento).`
+      });
+    }
+
+    const repR = await pool.query(
+      `INSERT INTO reposiciones (responsable, fondo, estado, creado_en, cerrado_en)
+       VALUES ($1, $2, 'cerrada', $3, $3) RETURNING id`,
+      [etiqueta || 'Histórico', fondo || 250, fecha_cierre || new Date()]);
+    const repId = repR.rows[0].id;
+    for (const f of facturas) {
+      await pool.query(
+        `INSERT INTO facturas
+         (reposicion_id, fecha, emisor, ruc, numero, descripcion, cc, codigo_proyecto,
+          sub0, sub15, descuento, iva, total, excedente)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [repId, f.fecha || null, f.emisor, f.ruc || null, f.numero, f.descripcion,
+         f.cc || 'ISLA', f.codigo_proyecto || 'ADM000',
+         f.sub0 || 0, f.sub15 || 0, f.descuento || 0, f.iva || 0, f.total || 0, f.excedente || 0]);
+    }
+    res.json({ ok: true, reposicion: repId, n: facturas.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
