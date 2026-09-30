@@ -14,9 +14,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <!-- Chart.js: gráficos del dashboard -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<!-- jsPDF + autoTable: generar el reporte en PDF -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root{
     --tinta:#12241c; --tesoro:#1b6b4f; --tesoro-claro:#e7f2ec;
@@ -147,7 +144,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 4.8</div>
+    <div style="font-size:12px;color:#7d867f">Versión 4.9</div>
   </div>
 </header>
 
@@ -816,7 +813,7 @@ function b64ToBuffer(b64){
   return bytes.buffer;
 }
 
-// Pregunta el formato y llama al que corresponda
+// Exporta a Excel (con bloqueo de duplicados)
 async function exportar(){
   if(!facturas.length) return;
 
@@ -837,18 +834,7 @@ async function exportar(){
     return;
   }
 
-  // Elegir formato
-  const formato = await dialogo({
-    titulo: '¿Cómo deseas descargar?',
-    icono: '📥', tipo: 'info',
-    mensaje: 'Elige el formato del reporte de reposición.',
-    botones:[
-      {txt:'Excel', val:'excel', prim:false},
-      {txt:'PDF', val:'pdf', prim:true}
-    ]
-  });
-  if(formato === 'excel') await exportarExcel();
-  else if(formato === 'pdf') await exportarPDF();
+  await exportarExcel();
 }
 
 async function exportarExcel(){
@@ -974,74 +960,6 @@ async function trasExportar(titulo){
   }
 }
 
-// Genera el reporte en PDF con jsPDF + autoTable
-async function exportarPDF(){
-  if(!facturas.length) return;
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
-  const fondo = parseFloat(document.getElementById('cfgFondo').value) || 0;
-  const hoy = new Date();
-  const responsable = (repActual && repActual.responsable) || 'Abrahan Gallegos';
-
-  // Encabezado
-  doc.setFontSize(14); doc.setFont(undefined,'bold');
-  doc.text('REPORTE REPOSICIÓN DE CAJA CHICA', 148, 15, {align:'center'});
-  doc.setFontSize(9); doc.setFont(undefined,'normal');
-  doc.text('Security Data — SD-FO-AF-03', 148, 20, {align:'center'});
-  doc.text(`Fecha: ${formatFecha(hoy.toISOString().slice(0,10))}`, 14, 28);
-  doc.text(`Encargado: ${responsable}`, 14, 33);
-  doc.text(`Fondo caja chica: $${fondo.toFixed(2)}`, 240, 28);
-
-  // Ordenar por fecha
-  const orden = [...facturas].sort((a,b)=>{
-    const fa=fechaOrden(a.fecha), fb=fechaOrden(b.fecha); return fa-fb;
-  });
-
-  // Filas de la tabla
-  let tGastos=0, tExc=0, tIva=0, tSub0=0, tSub15=0;
-  const filas = orden.map(f=>{
-    const total=Number(f.total)||0, iva=Number(f.iva)||0, exc=Number(f.excedente)||0;
-    const es0 = iva===0; const sub = +(total-iva).toFixed(2);
-    tGastos+=total; tExc+=exc; tIva+=iva; if(es0) tSub0+=total; else tSub15+=sub;
-    return [
-      f.fecha||'', f.emisor||'', f.comida||'', f.numero||'', f.cc||'', f.codigo_proyecto||'',
-      es0?total.toFixed(2):'', es0?'':sub.toFixed(2), iva.toFixed(2),
-      total.toFixed(2), exc>0?exc.toFixed(2):''
-    ];
-  });
-
-  doc.autoTable({
-    startY: 38,
-    head: [['FECHA','PROVEEDOR','DESCRIPCIÓN','No. DOCUMENTO','CC','CÓD. PROY.','SUB 0%','SUB 15%','IVA','VALOR','EXCED.']],
-    body: filas,
-    foot: [['','','','','','TOTALES:', tSub0.toFixed(2), tSub15.toFixed(2), tIva.toFixed(2), tGastos.toFixed(2), tExc.toFixed(2)]],
-    styles:{ fontSize:7, cellPadding:1.5 },
-    headStyles:{ fillColor:[27,107,79], textColor:255, fontSize:7 },
-    footStyles:{ fillColor:[231,242,236], textColor:[18,36,28], fontStyle:'bold' },
-    alternateRowStyles:{ fillColor:[246,244,238] },
-    columnStyles:{
-      6:{halign:'right'},7:{halign:'right'},8:{halign:'right'},9:{halign:'right'},10:{halign:'right'}
-    }
-  });
-
-  // Resumen de saldos
-  let y = doc.lastAutoTable.finalY + 8;
-  doc.setFontSize(9);
-  const saldoReq = tGastos;
-  doc.text(`Saldo caja: $${fondo.toFixed(2)}`, 200, y);
-  doc.text(`Saldo requerido (gastos): $${saldoReq.toFixed(2)}`, 200, y+5);
-  doc.text(`Valor excedente: $${tExc.toFixed(2)}`, 200, y+10);
-  doc.text(`Valor de reposición: $${(fondo-tExc).toFixed(2)}`, 200, y+15);
-
-  // Firma
-  doc.text(`_____________________`, 30, y+18);
-  doc.text(`${responsable}`, 30, y+23);
-  doc.text('ELABORADO POR', 30, y+28);
-
-  doc.save(`SD-FO-AF-03_Reposicion_CajaChica_${hoy.toISOString().slice(0,10).replace(/-/g,'')}.pdf`);
-
-  await trasExportar('PDF descargado');
-}
 function abrirManual(){
   // Llenar selectores de CC y proyecto desde el catálogo, con OTROS al final
   document.getElementById('mCC').innerHTML =
@@ -1488,13 +1406,25 @@ document.getElementById('impFile').addEventListener('change', async (ev)=>{
           cSub0 = col['SUB 0%'], cSub15 = col['SUB 15%'], cDesc2 = col['DESCUENTO'],
           cIva = col['IVA'], cValor = col['VALOR'], cExc = col['EXCEDENTE'];
 
-    // Leer facturas desde headerRow+3 (deja la fila TOTAL CAJA CHICA)
+    // Leer facturas (saltando cabeceras repetidas, totales y filas sin fecha válida)
     const facturas = [];
     for(let r=headerRow+1; r<=ws.rowCount; r++){
       const prov = ws.getCell(r, cProv).value;
       const fecha = cFecha ? ws.getCell(r, cFecha).value : null;
       if(!prov || String(prov).toUpperCase().includes('TOTAL CAJA')) continue;
-      if(!fecha) continue;   // saltar filas sin fecha (totales, vacías)
+      if(!fecha) continue;
+      // La fecha debe ser una Date real, o un texto que parezca fecha (dd/mm/aa o dd-mm-aa).
+      // Esto descarta cabeceras repetidas ("FECHA", "No. DOCUMENTO", etc.).
+      const esFechaValida = (fecha instanceof Date) ||
+        /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(String(fecha).trim()) ||
+        /\d{1,2}[\/\-][a-zA-Z]{3}[\/\-]\d{2,4}/.test(String(fecha).trim());  // 29-dic-25
+      if(!esFechaValida) continue;
+      // Descartar si el proveedor es literalmente un título de columna
+      const provUp = String(prov).toUpperCase().trim();
+      if(provUp === 'PROVEEDOR' || provUp === 'FECHA') continue;
+      // Descartar si el número de documento es el título de la columna
+      const numRaw = cNum ? String(ws.getCell(r, cNum).value||'').toUpperCase().trim() : '';
+      if(numRaw === 'NO. DOCUMENTO' || numRaw === 'NO DOCUMENTO' || numRaw === 'DOCUMENTO') continue;
       const val = v => { const x = ws.getCell(r, v).value; return (x && x.result!==undefined)? x.result : x; };
       let fISO = null;
       const fv = ws.getCell(r, cFecha).value;
