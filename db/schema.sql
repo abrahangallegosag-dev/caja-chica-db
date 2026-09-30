@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS centros_costo (
   creado_en   TIMESTAMP    NOT NULL DEFAULT NOW()
 );
 
+-- Descripciones recurrentes (agua, almuerzo, merienda, etc.)
+CREATE TABLE IF NOT EXISTS descripciones (
+  id          SERIAL PRIMARY KEY,
+  texto       VARCHAR(60)  NOT NULL UNIQUE,
+  activo      BOOLEAN      NOT NULL DEFAULT TRUE,
+  creado_en   TIMESTAMP    NOT NULL DEFAULT NOW()
+);
+
 -- Reposiciones (cada "corte" de caja chica = un reporte SD-FO-AF-03)
 CREATE TABLE IF NOT EXISTS reposiciones (
   id            SERIAL PRIMARY KEY,
@@ -69,3 +77,7 @@ INSERT INTO centros_costo (codigo, nombre) VALUES
   ('ISLA', 'Isla'),
   ('OFICINA', 'Oficina')
 ON CONFLICT (codigo) DO NOTHING;
+
+INSERT INTO descripciones (texto) VALUES
+  ('MERIENDA'), ('ALMUERZO'), ('DESAYUNO'), ('AGUA')
+ON CONFLICT (texto) DO NOTHING;
