@@ -114,6 +114,10 @@
   .btn-x{background:none;border:none;color:var(--tinta-suave);cursor:pointer;font-size:15px;
     padding:2px 6px;border-radius:5px}
   .btn-x:hover{background:var(--alerta-bg);color:var(--alerta)}
+  .btn-mov{background:none;border:none;color:var(--tinta-suave);cursor:pointer;font-size:12px;
+    padding:2px 4px;border-radius:4px;line-height:1}
+  .btn-mov:hover:not(:disabled){background:var(--tesoro-claro);color:var(--tesoro)}
+  .btn-mov:disabled{opacity:.25;cursor:default}
 
   .vacio{text-align:center;padding:40px 20px;color:var(--tinta-suave);background:#fff;border-radius:10px}
   .vacio .ico{font-size:34px;margin-bottom:10px;opacity:.5}
@@ -144,7 +148,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 4.9</div>
+    <div style="font-size:12px;color:#7d867f">Versión 5.1</div>
   </div>
 </header>
 
@@ -193,6 +197,7 @@
 
   <div class="acciones" id="accionesExport" style="display:none">
     <button class="btn btn-sec" onclick="autoClasificarComidas()" title="Si hay 2 comidas el mismo día: la 1a queda ALMUERZO y la 2a MERIENDA">🍽 Auto-clasificar comidas</button>
+    <button class="btn btn-sec" onclick="reordenarPorFecha()" title="Vuelve a ordenar automáticamente por fecha">🗓 Ordenar por fecha</button>
     <button class="btn btn-sec" onclick="limpiar()">Limpiar todo</button>
     <button class="btn btn-prim" onclick="exportar()">Exportar a Excel</button>
   </div>
@@ -421,7 +426,10 @@ function fechaOrden(str){
 
 // Ordena el array 'facturas' en su lugar por fecha ascendente (empates por id).
 // Al ordenar el array real, los índices de la tabla siguen siendo válidos.
+let ordenManual = false;   // true cuando el usuario reordena filas a mano
+
 function ordenarFacturas(){
+  if(ordenManual) return;   // respetar el orden que el usuario dejó manualmente
   facturas.sort((a,b)=>{
     const fa = fechaOrden(a.fecha), fb = fechaOrden(b.fecha);
     if(fa !== fb) return fa - fb;
@@ -731,7 +739,11 @@ function render(){
       <td class="der num">—</td>
       <td class="der num">${money(d.gastos)}</td>
       <td class="der num montoexc">${exc>0?money(exc):'—'}</td>
-      <td class="der"><button class="btn-x" onclick="eliminar(${idx})" title="Eliminar">✕</button></td>
+      <td class="der" style="white-space:nowrap">
+        <button class="btn-mov" onclick="moverFila(${idx},-1)" title="Subir" ${idx===0?'disabled':''}>▲</button>
+        <button class="btn-mov" onclick="moverFila(${idx},1)" title="Bajar" ${idx===facturas.length-1?'disabled':''}>▼</button>
+        <button class="btn-x" onclick="eliminar(${idx})" title="Eliminar">✕</button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -781,6 +793,23 @@ function editarTotal(i, val){
   guardarFacturaDB(facturas[i]);
   render();
 }
+// Reactiva el orden automático por fecha (descarta el orden manual)
+function reordenarPorFecha(){
+  ordenManual = false;
+  ordenarFacturas();
+  render();
+}
+
+// Mueve una fila hacia arriba (dir=-1) o abajo (dir=1) en la tabla.
+// Al mover a mano, se respeta tu orden (no se vuelve a ordenar por fecha).
+function moverFila(i, dir){
+  const j = i + dir;
+  if(j < 0 || j >= facturas.length) return;
+  [facturas[i], facturas[j]] = [facturas[j], facturas[i]];
+  ordenManual = true;        // ya no reordenar automáticamente por fecha
+  render();
+}
+
 async function eliminar(i){
   if(!(await confirmar('¿Eliminar este comprobante?', 'Eliminar', '🗑'))) return;
   const f = facturas[i];
