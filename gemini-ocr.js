@@ -7,7 +7,7 @@ const { GoogleGenAI, Type } = require('@google/genai');
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // Modelo Flash. Verifica el nombre vigente en aistudio.google.com y cámbialo aquí si hace falta.
-const MODELO = 'gemini-2.5-flash';
+const MODELO = 'gemini-3.8-flash';
 
 const schemaComprobante = {
   type: Type.OBJECT,
