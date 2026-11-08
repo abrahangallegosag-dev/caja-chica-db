@@ -5,6 +5,9 @@
 const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
+const multer = require('multer');
+const { leerComprobante } = require('./gemini-ocr');
+const uploadMem = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -297,6 +300,20 @@ async function initDB() {
 }
 
 // Endpoint de diagnóstico: dice si el servidor y la base están bien
+// Leer un comprobante (foto/escaneo/pdf) con Gemini
+app.post('/api/leer-gemini', uploadMem.single('archivo'), async (req, res) => {
+  try {
+    if (!process.env.GEMINI_API_KEY)
+      return res.status(500).json({ error: 'Falta configurar GEMINI_API_KEY en el servidor' });
+    if (!req.file) return res.status(400).json({ error: 'No se envió ningún archivo' });
+    const datos = await leerComprobante(req.file.buffer, req.file.mimetype);
+    res.json({ ok: true, datos });
+  } catch (e) {
+    console.error('Error Gemini:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
