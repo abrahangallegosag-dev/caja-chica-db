@@ -12,8 +12,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('render.com')
-    ? { rejectUnauthorized: false } : false,
+  // En Render (o cualquier Postgres en la nube) se requiere SSL.
+  // Se activa siempre que haya DATABASE_URL; en local (sin esa variable) queda sin SSL.
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+});
+
+// Log de diagnóstico: si la conexión falla, se verá el motivo real en los Logs de Render
+pool.on('error', (err) => {
+  console.error('Error de conexión a PostgreSQL:', err.message);
 });
 
 // ---------- Catálogos ----------
@@ -273,13 +279,32 @@ app.post('/api/importar-historico', async (req, res) => {
 const fs = require('fs');
 async function initDB() {
   try {
+    // Verificar conexión primero
+    await pool.query('SELECT 1');
+    console.log('Conexión a PostgreSQL OK.');
+  } catch (e) {
+    console.error('NO se pudo conectar a PostgreSQL:', e.message);
+    console.error('Revisa que la variable DATABASE_URL esté configurada en Render.');
+    return;
+  }
+  try {
     const sql = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
     await pool.query(sql);
     console.log('Base de datos verificada/inicializada correctamente.');
   } catch (e) {
-    console.error('Error inicializando la base de datos:', e.message);
+    console.error('Error creando las tablas:', e.message);
   }
 }
+
+// Endpoint de diagnóstico: dice si el servidor y la base están bien
+app.get('/api/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ ok: true, db: 'conectada' });
+  } catch (e) {
+    res.status(500).json({ ok: false, db: 'error', mensaje: e.message });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 initDB().then(() => {
