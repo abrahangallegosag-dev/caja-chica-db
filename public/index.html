@@ -148,7 +148,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 5.1</div>
+    <div style="font-size:12px;color:#7d867f">Versión 5.2</div>
   </div>
 </header>
 
@@ -301,10 +301,15 @@
       leer lo impreso automáticamente; el monto y lo manuscrito los escribes tú.
     </p>
 
-    <div style="border:2px dashed var(--linea);border-radius:10px;padding:14px;text-align:center;margin-bottom:16px;cursor:pointer"
+    <div style="border:2px dashed var(--linea);border-radius:10px;padding:14px;text-align:center;margin-bottom:10px;cursor:pointer"
          onclick="document.getElementById('fileOCR').click()">
-      <span id="ocrLabel" style="font-size:13px;color:var(--tesoro);font-weight:500">📷 Subir foto/escaneo (opcional)</span>
+      <span id="ocrLabel" style="font-size:13px;color:var(--tesoro);font-weight:500">📷 Leer local (impreso) — Tesseract</span>
       <input type="file" id="fileOCR" accept="image/*,application/pdf" style="display:none">
+    </div>
+    <div style="border:2px dashed var(--oro);border-radius:10px;padding:14px;text-align:center;margin-bottom:16px;cursor:pointer;background:#fffdf5"
+         onclick="document.getElementById('fileGemini').click()">
+      <span id="geminiLabel" style="font-size:13px;color:#b8860b;font-weight:600">✨ Leer con IA (incluye manuscrito) — Gemini</span>
+      <input type="file" id="fileGemini" accept="image/*,application/pdf" style="display:none">
     </div>
     <div id="ocrEstado" style="display:none;font-size:12.5px;color:var(--tesoro);text-align:center;margin-bottom:12px">
       <span class="spinner" style="width:16px;height:16px"></span> Leyendo imagen…
@@ -1043,6 +1048,45 @@ function cargarTesseract(){
     document.head.appendChild(s);
   });
 }
+
+// Lectura con IA (Gemini): sirve para impreso Y manuscrito
+document.getElementById('fileGemini').addEventListener('change', async (ev)=>{
+  const file = ev.target.files[0];
+  if(!file) return;
+  const estado = document.getElementById('ocrEstado');
+  estado.style.display = 'block';
+  estado.innerHTML = '<span class="spinner" style="width:16px;height:16px"></span> Leyendo con IA… (puede tardar unos segundos)';
+  try{
+    const fd = new FormData();
+    fd.append('archivo', file);
+    const r = await (await fetch('/api/leer-gemini', {method:'POST', body:fd})).json();
+    if(!r.ok) throw new Error(r.error || 'No se pudo leer');
+    const d = r.datos;
+    // Llenar los campos del formulario con lo que devolvió la IA
+    if(d.fecha) setCampo('mFecha', d.fecha);
+    if(d.establecimiento) setCampo('mEmisor', d.establecimiento);
+    if(d.ruc) setCampo('mRuc', d.ruc);
+    if(d.numero_documento) setCampo('mNumero', d.numero_documento);
+    if(d.total) setCampo('mTotal', String(d.total));
+    if(d.concepto){
+      const sel = document.getElementById('mComida');
+      const existe = [...sel.options].some(o=>o.value.toUpperCase()===d.concepto.toUpperCase());
+      if(existe) sel.value = d.concepto.toUpperCase();
+    }
+    // Marcar en rojo lo que no leyó
+    ['mFecha','mEmisor','mRuc','mNumero','mTotal'].forEach(marcarNoLeido);
+    // Aviso según la confianza del total
+    const conf = d.confianza_total || 'media';
+    const colorConf = conf==='alta'?'#1b6b4f':conf==='media'?'#b8860b':'#c0392b';
+    document.getElementById('geminiLabel').innerHTML =
+      `✨ Leído con IA · Confianza del total: <b style="color:${colorConf}">${conf.toUpperCase()}</b>` +
+      (conf!=='alta' ? ' — <b style="color:#c0392b">revisa el monto</b>' : '');
+  }catch(e){
+    document.getElementById('geminiLabel').textContent = '⚠ No se pudo leer con IA: ' + e.message;
+  }finally{
+    estado.style.display = 'none';
+  }
+});
 
 document.getElementById('fileOCR').addEventListener('change', async (ev)=>{
   const file = ev.target.files[0];
