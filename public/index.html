@@ -148,7 +148,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 5.2</div>
+    <div style="font-size:12px;color:#7d867f">Versión 5.5</div>
   </div>
 </header>
 
@@ -323,7 +323,6 @@
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" autocomplete="off">
       <div class="mcampo"><label>Fecha (dd/mm/aaaa)</label><input id="mFecha" autocomplete="off"></div>
       <div class="mcampo"><label>Emisor / Proveedor</label><input id="mEmisor" autocomplete="off"></div>
-      <div class="mcampo"><label>RUC</label><input id="mRuc" autocomplete="off"></div>
       <div class="mcampo"><label>No. Documento</label><input id="mNumero" autocomplete="off"></div>
       <div class="mcampo"><label>Descripción</label>
         <select id="mComida" onchange="toggleOtro('mComida','mComidaOtro')">
@@ -347,6 +346,9 @@
         </label>
       </div>
     </div>
+
+    <!-- RUC ya no se usa: campo oculto para no romper la lógica -->
+    <input type="hidden" id="mRuc">
 
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
       <button class="btn btn-sec" onclick="cerrarManual()">Cancelar</button>
@@ -1240,12 +1242,12 @@ function prellenarDesdeOCR(txt){
 
 async function guardarManual(){
   const emisor = document.getElementById('mEmisor').value.trim();
-  const ruc = document.getElementById('mRuc').value.trim();
   const numero = document.getElementById('mNumero').value.trim();
   const total = parseFloat(document.getElementById('mTotal').value) || 0;
   const fechaTxt = document.getElementById('mFecha').value.trim();
+  const ruc = '';   // el RUC ya no se usa
 
-  // Validar todos los campos obligatorios, marcando en rojo los que falten
+  // Validar campos obligatorios (ya no se pide RUC)
   const faltantes = [];
   function chequear(id, ok){
     const el = document.getElementById(id);
@@ -1255,12 +1257,11 @@ async function guardarManual(){
   }
   chequear('mFecha', /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fechaTxt));
   chequear('mEmisor', emisor.length > 0);
-  chequear('mRuc', ruc.length > 0);
   chequear('mNumero', numero.length > 0);
   chequear('mTotal', total > 0);
 
   if(faltantes.length){
-    await avisar('Faltan datos obligatorios (marcados en rojo):\n\n• La fecha debe ser día/mes/año (ej: 11/8/2026)\n• Emisor, RUC, No. Documento y Total no pueden estar vacíos.',
+    await avisar('Faltan datos obligatorios (marcados en rojo):\n\n• La fecha debe ser día/mes/año (ej: 11/8/2026)\n• Emisor, No. Documento y Total no pueden estar vacíos.',
       'Completa los datos', 'alerta', '✏️');
     document.getElementById(faltantes[0]).focus();
     return;
