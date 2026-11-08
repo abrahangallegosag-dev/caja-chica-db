@@ -148,7 +148,7 @@
   <div class="marca"><h1>Caja Chica</h1><span class="sub">Security Data</span></div>
   <div class="resp">
     <div>Abrahan Gallegos</div>
-    <div style="font-size:12px;color:#7d867f">Versión 5.5</div>
+    <div style="font-size:12px;color:#7d867f">Versión 5.8</div>
   </div>
 </header>
 
@@ -1057,11 +1057,31 @@ document.getElementById('fileGemini').addEventListener('change', async (ev)=>{
   if(!file) return;
   const estado = document.getElementById('ocrEstado');
   estado.style.display = 'block';
-  estado.innerHTML = '<span class="spinner" style="width:16px;height:16px"></span> Leyendo con IA… (puede tardar unos segundos)';
+  estado.innerHTML = '<span class="spinner" style="width:16px;height:16px"></span> Leyendo con IA… (si está ocupado, reintenta solo; puede tardar hasta 1 min)';
   try{
     const fd = new FormData();
-    fd.append('archivo', file);
-    const r = await (await fetch('/api/leer-gemini', {method:'POST', body:fd})).json();
+    // Si es PDF, convertirlo a imagen JPG liviana (Gemini la procesa mucho más rápido).
+    // El PDF original tuyo no se toca; esto es solo para la lectura.
+    if(file.type === 'application/pdf'){
+      estado.innerHTML = '<span class="spinner" style="width:16px;height:16px"></span> Preparando el PDF…';
+      const blobJpg = await pdfPrimeraPaginaJPG(file);
+      fd.append('archivo', blobJpg, 'comprobante.jpg');
+    } else {
+      fd.append('archivo', file);
+    }
+    estado.innerHTML = '<span class="spinner" style="width:16px;height:16px"></span> Leyendo con IA… (si está ocupado, reintenta solo)';
+    // Timeout: si no responde a tiempo, cortar la espera
+    const controlador = new AbortController();
+    const tiempoLimite = setTimeout(()=>controlador.abort(), 90000);
+    let r;
+    try{
+      r = await (await fetch('/api/leer-gemini', {method:'POST', body:fd, signal: controlador.signal})).json();
+    }catch(err){
+      clearTimeout(tiempoLimite);
+      if(err.name === 'AbortError') throw new Error('La lectura tardó demasiado. Intenta con una imagen JPG en vez de PDF, o reintenta en un minuto.');
+      throw err;
+    }
+    clearTimeout(tiempoLimite);
     if(!r.ok) throw new Error(r.error || 'No se pudo leer');
     const d = r.datos;
     // Llenar los campos del formulario con lo que devolvió la IA
@@ -1164,6 +1184,18 @@ async function pdfPrimeraPaginaImg(file){
   canvas.width = viewport.width; canvas.height = viewport.height;
   await page.render({canvasContext:canvas.getContext('2d'), viewport}).promise;
   return canvas.toDataURL('image/png');
+}
+
+// Convierte la 1ra página del PDF a un Blob JPG liviano (para enviar a Gemini rápido)
+async function pdfPrimeraPaginaJPG(file){
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({scale:1.5});   // escala moderada: legible pero liviano
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width; canvas.height = viewport.height;
+  await page.render({canvasContext:canvas.getContext('2d'), viewport}).promise;
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85)); // JPG calidad 85%
 }
 
 // Extrae lo legible del texto OCR y prellena el formulario
