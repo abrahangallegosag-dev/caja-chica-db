@@ -37,23 +37,44 @@ Extrae los datos al JSON pedido. Reglas:
 - "confianza_total": alta, media o baja según qué tan seguro estés del total.
 - NUNCA inventes un número. Si dudas, pon 0 y confianza "baja".`;
 
+// Pausa de ms milisegundos
+const dormir = (ms) => new Promise(r => setTimeout(r, ms));
+
 async function leerComprobante(buffer, mimeType) {
-  const respuesta = await ai.models.generateContent({
-    model: MODELO,
-    contents: [{
-      role: 'user',
-      parts: [
-        { text: INSTRUCCION },
-        { inlineData: { mimeType: mimeType, data: buffer.toString('base64') } }
-      ]
-    }],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: schemaComprobante,
-      temperature: 0
+  const MAX_INTENTOS = 3;           // hasta 3 intentos (equilibrio entre no fallar y no tardar)
+  const ESPERAS = [0, 1500, 3000];  // pausa antes de cada intento (0, 1.5s, 3s)
+
+  let ultimoError = null;
+  for (let intento = 0; intento < MAX_INTENTOS; intento++) {
+    if (ESPERAS[intento]) await dormir(ESPERAS[intento]);
+    try {
+      const respuesta = await ai.models.generateContent({
+        model: MODELO,
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: INSTRUCCION },
+            { inlineData: { mimeType: mimeType, data: buffer.toString('base64') } }
+          ]
+        }],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: schemaComprobante,
+          temperature: 0
+        }
+      });
+      return JSON.parse(respuesta.text);   // éxito: salimos
+    } catch (e) {
+      ultimoError = e;
+      const msg = String(e.message || '');
+      // Solo reintentar si es saturación (503) o sobrecarga; otros errores no se reintentan
+      const esSaturacion = msg.includes('503') || /overload|unavailable|high demand/i.test(msg);
+      if (!esSaturacion) throw e;        // error distinto: fallar de una vez
+      // si fue saturación, el bucle reintenta tras la pausa
     }
-  });
-  return JSON.parse(respuesta.text);
+  }
+  // Se agotaron los intentos
+  throw new Error('El servicio de IA está muy ocupado en este momento (saturación de Google). Intenta de nuevo en un minuto.');
 }
 
 module.exports = { leerComprobante };
